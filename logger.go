@@ -8,19 +8,43 @@ import (
 	"sync"
 )
 
+// Logger represents a thread-safe logging instance with file rotation capabilities.
+//
+// The Logger provides:
+// - Thread-safe logging operations
+// - Log file rotation based on size
+// - Console and file output
+// - Buffer pooling for performance
+// - Customizable log levels, file paths, and timestamp formats
 type Logger struct {
-	mu              sync.RWMutex
-	level           LogLevel
-	baseFilename    string
-	maxBytes        int64
-	backupCount     int
-	file            *os.File
-	multiWriter     io.Writer
-	bufferPool      *sync.Pool
-	timestampFormat string
-	outputs         []io.Writer
+	mu              sync.RWMutex // Ensures thread-safe logging operations
+	level           LogLevel     // Minimum log level to record
+	baseFilename    string       // Base name of the log file
+	maxBytes        int64        // Maximum size of log file before rotation
+	backupCount     int          // Number of backup files to keep
+	file            *os.File     // Current log file handle
+	multiWriter     io.Writer    // Writes to multiple outputs (e.g., console, file)
+	bufferPool      *sync.Pool   // Pool of reusable buffers
+	timestampFormat string       // Customizable timestamp format
+	outputs         []io.Writer  // Additional outputs for logging
 }
 
+// log is the internal logging function used by all logging methods.
+//
+// This method:
+// - Checks if the message should be logged based on level
+// - Formats the message with metadata
+// - Manages buffer pool usage
+// - Handles log rotation
+// - Ensures thread-safe writing
+//
+// Parameters:
+//   - level: Severity level of the log message
+//   - message: The message to log
+//
+// Thread safety:
+//
+//	Protected by mutex for concurrent access
 func (l *Logger) log(level LogLevel, message string) {
 	if level < l.level {
 		return
@@ -40,12 +64,31 @@ func (l *Logger) log(level LogLevel, message string) {
 		fmt.Fprintf(os.Stderr, "Log rotation error: %v\n", err)
 	}
 
+	// Write to multi-writer and handle potential errors
 	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
+		// Since this is a logging error, we write directly to stderr
+		// We don't want to call l.log again as it could cause infinite recursion
 		fmt.Fprintf(os.Stderr, "Failed to write log message: %v\nOriginal message: %s", err, formattedMsg)
+
+		// For FATAL level logs, we still want to exit even if the write failed
 		if level == FATAL {
 			os.Exit(1)
 		}
 	}
+}
+
+// SetLogLevel updates the minimum log level at runtime.
+//
+// Parameters:
+//   - level: New minimum log level
+//
+// Example:
+//
+//	logger.SetLogLevel(gourdianlogger.DEBUG)
+func (l *Logger) SetLogLevel(level LogLevel) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.level = level
 }
 
 // Debug logs a message at DEBUG level.
