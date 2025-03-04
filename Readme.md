@@ -1,6 +1,6 @@
-# GourdianLogger
+# gourdianlogger
 
-**GourdianLogger** is a thread-safe, rotating file logger for Go applications. It provides advanced logging capabilities, including log levels, file rotation, console and file output, and customizable configurations. It is designed to be simple to use while offering powerful features for production-grade logging.
+**gourdianlogger** is a thread-safe, rotating file logger for Go applications. It provides advanced logging capabilities, including log levels, file rotation, console and file output, and customizable configurations. It is designed to be simple to use while offering powerful features for production-grade logging.
 
 ---
 
@@ -11,10 +11,10 @@
 - **Thread-Safe**: Safe for concurrent use across multiple goroutines.
 - **Console and File Output**: Logs to both the console and a file simultaneously.
 - **Customizable**:
-  - Log file paths
-  - Timestamp formats
-  - Log levels
-  - Additional outputs (e.g., external services)
+    - Log file paths
+    - Timestamp formats
+    - Log levels
+    - Additional outputs (e.g., external services)
 - **Buffer Pooling**: Optimized for performance with reusable buffers.
 - **Source Code Information**: Includes file, line number, and function name in log messages.
 
@@ -26,6 +26,7 @@ To install `gourdianlogger`, use `go get`:
 
 ```bash
 go get github.com/gourdian25/gourdianlogger@latest
+
 ```
 
 ---
@@ -61,6 +62,7 @@ func main() {
 	logger.Error("Failed to connect to database")
 	// logger.Fatal("Critical error, shutting down") // Will exit the program
 }
+
 ```
 
 ---
@@ -80,6 +82,7 @@ type LoggerConfig struct {
 	TimestampFormat string      // Custom timestamp format (default: "2006/01/02 15:04:05.000000")
 	Outputs         []io.Writer // Additional outputs for logging (e.g., external services)
 }
+
 ```
 
 ### Example Configuration
@@ -93,6 +96,7 @@ config := gourdianlogger.LoggerConfig{
 	TimestampFormat: "2006-01-02 15:04:05",
 	Outputs:         []io.Writer{externalServiceWriter}, // Optional: Add additional outputs
 }
+
 ```
 
 ---
@@ -114,6 +118,7 @@ You can set the minimum log level at runtime:
 ```go
 logger.SetLogLevel(gourdianlogger.DEBUG) // Log all messages
 logger.SetLogLevel(gourdianlogger.ERROR) // Log only ERROR and FATAL messages
+
 ```
 
 ### Parsing Log Levels
@@ -126,6 +131,7 @@ if err != nil {
 	panic(err)
 }
 logger.SetLogLevel(level)
+
 ```
 
 ---
@@ -152,6 +158,7 @@ You can add additional outputs (e.g., external services) to the logger:
 
 ```go
 logger.AddOutput(externalServiceWriter)
+
 ```
 
 ### Example: Logging to Multiple Destinations
@@ -162,6 +169,7 @@ if err != nil {
 	panic(err)
 }
 logger.AddOutput(file)
+
 ```
 
 ---
@@ -172,12 +180,14 @@ Log messages are formatted as follows:
 
 ```
 timestamp [LEVEL] file:line (function): message
+
 ```
 
 Example:
 
 ```
 2023/10/25 15:04:05.000000 [INFO] main.go:10 (main): Application started
+
 ```
 
 ### Customizing Timestamps
@@ -188,6 +198,7 @@ You can customize the timestamp format using the `TimestampFormat` field in `Log
 config := gourdianlogger.LoggerConfig{
 	TimestampFormat: "2006-01-02 15:04:05",
 }
+
 ```
 
 ---
@@ -231,6 +242,7 @@ defer logger.Close()
 logger.Info("Application started")
 logger.Warn("Disk space is low")
 logger.Error("Failed to connect to database")
+
 ```
 
 ### Example 2: Custom Timestamp Format
@@ -246,6 +258,7 @@ if err != nil {
 defer logger.Close()
 
 logger.Info("Custom timestamp format")
+
 ```
 
 ### Example 3: Log Rotation
@@ -264,13 +277,14 @@ defer logger.Close()
 for i := 0; i < 100000; i++ {
 	logger.Info("This is log message number:", i)
 }
+
 ```
 
 ---
 
 ## License
 
-GourdianLogger is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+GourdianLogger is licensed under the MIT License. See the [LICENSE](https://github.com/gourdian25/gourdianlogger/blob/master/LICENSE) file for details.
 
 ---
 
@@ -279,3 +293,5 @@ GourdianLogger is licensed under the MIT License. See the [LICENSE](LICENSE) fil
 Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/gourdian25/gourdianlogger).
 
 ---
+
+This `README.md` provides a comprehensive guide to using GourdianLogger, from installation to advanced features. Let me know if you need further adjustments!
