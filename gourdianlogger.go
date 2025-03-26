@@ -200,23 +200,6 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-// checkFileSize checks if log rotation is needed
-func (l *Logger) checkFileSize() error {
-	fi, err := l.file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	if fi.Size() >= l.maxBytes {
-		select {
-		case l.rotateChan <- struct{}{}:
-		default:
-			// Rotation already pending
-		}
-	}
-	return nil
-}
-
 // rotationWorker handles log file rotation in the background
 func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
