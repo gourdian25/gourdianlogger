@@ -1,0 +1,14 @@
+.
+├── LICENSE
+├── Readme.md
+├── docs.go
+├── go.mod
+├── gourdianlogger.go
+├── gourdianlogger_benchmark_test.go
+├── gourdianlogger_error_test.go
+├── gourdianlogger_serialization_test.go
+├── gourdianlogger_test.go
+├── tree.txt
+└── version.go
+
+1 directory, 11 files
