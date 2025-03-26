@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // LogLevel represents the severity level of log messages
@@ -34,6 +36,20 @@ var (
 	defaultLogsDir         string = "logs"
 )
 
+// Color styles for different log levels
+var (
+	debugStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")) // Purple
+	infoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#43BF6D")) // Green
+	warnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500")) // Orange
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")) // Pink/Red
+	fatalStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")). // White
+			Background(lipgloss.Color("#FF0000")). // Red
+			Bold(true)
+	timestampStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888B7E")) // Gray
+	callerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#A550DF")) // Purple
+)
+
 // LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
 	Filename        string      `json:"filename"`         // Base filename for logs
@@ -46,6 +62,8 @@ type LoggerConfig struct {
 	EnableCaller    bool        `json:"enable_caller"`    // Include caller info
 	BufferSize      int         `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int         `json:"async_workers"`    // Number of async workers
+	EnableColor     bool        `json:"enable_color"`     // Enable colored output
+	ShowBanner      bool        `json:"show_banner"`      // Show banner on initialization
 }
 
 // Logger is the main logging struct
@@ -69,6 +87,39 @@ type Logger struct {
 	asyncQueue       chan *logEntry // Async logging queue
 	asyncCloseChan   chan struct{}  // Async stop signal
 	asyncWorkerCount int            // Number of async workers
+	enableColor      bool           // Enable colored output
+}
+
+// colorWriter is a custom writer that applies color to console output
+type colorWriter struct{}
+
+func (w colorWriter) Write(p []byte) (n int, err error) {
+	// For the console, we'll let the formatMessage function handle coloring
+	return os.Stdout.Write(p)
+}
+
+// showBanner displays the cute cat banner
+func (l *Logger) showBanner() {
+	cat := `
+  猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪
+  猫咪猫咪猫咪猫咪猫咪猫╭──────────────────────────────────────────────────╮猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫│                                                  │猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫│     Are you sure you want to eat marmalade?      │猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫│                                                  │猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫│                 Yes        Maybe                 │猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫│                                                  │猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫╰──────────────────────────────────────────────────╯猫咪猫咪猫咪猫咪猫咪猫
+  猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪猫咪
+`
+
+	// Style the banner
+	bannerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F25D94")). // Pink
+		Background(lipgloss.Color("#FFF7DB")). // Cream
+		Margin(1, 0, 1, 0)
+
+	// Print the banner to stdout (not to log files)
+	fmt.Println(bannerStyle.Render(cat))
 }
 
 type logEntry struct {
@@ -109,8 +160,10 @@ func DefaultConfig() LoggerConfig {
 		TimestampFormat: defaultTimestampFormat,
 		LogsDir:         defaultLogsDir,
 		EnableCaller:    true,
-		BufferSize:      0, // Sync by default
-		AsyncWorkers:    1, // Default workers if async enabled
+		BufferSize:      0,    // Sync by default
+		AsyncWorkers:    1,    // Default workers if async enabled
+		EnableColor:     true, // Color enabled by default
+		ShowBanner:      true, // Show banner by default
 	}
 }
 
@@ -149,7 +202,13 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	}
 
 	// Setup outputs with stdout and file as defaults
-	outputs := []io.Writer{os.Stdout, file}
+	outputs := []io.Writer{file} // File always first
+	if config.EnableColor {
+		outputs = append(outputs, colorWriter{}) // Our custom color writer for console
+	} else {
+		outputs = append(outputs, os.Stdout) // Plain stdout if color disabled
+	}
+
 	if config.Outputs != nil {
 		outputs = append(outputs, config.Outputs...)
 	}
@@ -174,6 +233,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		rotateCloseChan:  make(chan struct{}),
 		enableCaller:     config.EnableCaller,
 		asyncWorkerCount: config.AsyncWorkers,
+		enableColor:      config.EnableColor,
 	}
 
 	logger.level.Store(int32(config.LogLevel))
@@ -195,6 +255,11 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 			logger.wg.Add(1)
 			go logger.asyncWorker()
 		}
+	}
+
+	// Show banner if enabled
+	if config.ShowBanner {
+		logger.showBanner()
 	}
 
 	return logger, nil
@@ -269,9 +334,34 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// formatMessage formats the log message with all metadata
+// formatMessage formats the log message with all metadata and color
 func (l *Logger) formatMessage(level LogLevel, message string) string {
-	var callerInfo string
+	var (
+		levelStr     string
+		callerInfo   string
+		timestampStr = time.Now().Format(l.timestampFormat)
+	)
+
+	// Apply color to level if enabled
+	if l.enableColor {
+		switch level {
+		case DEBUG:
+			levelStr = debugStyle.Render(level.String())
+		case INFO:
+			levelStr = infoStyle.Render(level.String())
+		case WARN:
+			levelStr = warnStyle.Render(level.String())
+		case ERROR:
+			levelStr = errorStyle.Render(level.String())
+		case FATAL:
+			levelStr = fatalStyle.Render(level.String())
+		}
+		timestampStr = timestampStyle.Render(timestampStr)
+	} else {
+		levelStr = level.String()
+	}
+
+	// Get caller info if enabled
 	if l.enableCaller {
 		pc, file, line, ok := runtime.Caller(3) // Adjusted depth for wrapper methods
 		if ok {
@@ -287,13 +377,18 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 					funcName = name
 				}
 			}
-			callerInfo = fmt.Sprintf("%s:%d(%s) ", filepath.Base(file), line, funcName)
+			callerInfo = fmt.Sprintf("%s:%d(%s)", filepath.Base(file), line, funcName)
+			if l.enableColor {
+				callerInfo = callerStyle.Render(callerInfo) + " "
+			} else {
+				callerInfo = callerInfo + " "
+			}
 		}
 	}
 
 	return fmt.Sprintf("%s [%s] %s%s\n",
-		time.Now().Format(l.timestampFormat),
-		level,
+		timestampStr,
+		levelStr,
 		callerInfo,
 		message,
 	)
