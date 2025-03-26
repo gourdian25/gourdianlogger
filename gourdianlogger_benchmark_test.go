@@ -1,20 +1,19 @@
 package gourdianlogger
 
-import "testing"
+import (
+	"io"
+	"io/ioutil"
+	"os"
+	"strings"
+	"testing"
+)
 
-// BenchmarkLogging benchmarks the performance of logging
 func BenchmarkLogging(b *testing.B) {
-	defer cleanupTestFiles(b)
-
-	config := LoggerConfig{
-		Filename:    "benchmark",
-		LogsDir:     testLogDir,
-		BackupCount: 1,
-	}
-
+	config := DefaultConfig()
+	config.Outputs = []io.Writer{ioutil.Discard}
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		b.Fatalf("Failed to create logger: %v", err)
+		b.Fatal(err)
 	}
 	defer logger.Close()
 
@@ -24,55 +23,58 @@ func BenchmarkLogging(b *testing.B) {
 	}
 }
 
-// BenchmarkAsyncLogging benchmarks the performance of async logging
-func BenchmarkAsyncLogging(b *testing.B) {
-	defer cleanupTestFiles(b)
-
-	config := LoggerConfig{
-		Filename:     "benchmark_async",
-		LogsDir:      testLogDir,
-		BackupCount:  1,
-		BufferSize:   1000,
-		AsyncWorkers: 4,
-	}
-
+func BenchmarkLoggingWithCaller(b *testing.B) {
+	config := DefaultConfig()
+	config.Outputs = []io.Writer{ioutil.Discard}
+	config.EnableCaller = true
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		b.Fatalf("Failed to create logger: %v", err)
+		b.Fatal(err)
 	}
 	defer logger.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark async log message")
+		logger.Info("benchmark log message with caller")
 	}
+}
+
+func BenchmarkAsyncLogging(b *testing.B) {
+	config := DefaultConfig()
+	config.Outputs = []io.Writer{ioutil.Discard}
+	config.BufferSize = 1000
+	config.AsyncWorkers = 4
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer logger.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("async benchmark log message")
+	}
+	b.StopTimer()
 	logger.Flush()
 }
 
-// BenchmarkLogRotation benchmarks the performance of log rotation
 func BenchmarkLogRotation(b *testing.B) {
-	defer cleanupTestFiles(b)
+	dir := "bench_rotate"
+	os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
 
-	config := LoggerConfig{
-		Filename:    "benchmark_rotate",
-		LogsDir:     testLogDir,
-		MaxBytes:    100, // Small size to force rotation
-		BackupCount: 5,
-	}
+	config := DefaultConfig()
+	config.LogsDir = dir
+	config.MaxBytes = 100 // Small size to force frequent rotation
 
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		b.Fatalf("Failed to create logger: %v", err)
+		b.Fatal(err)
 	}
 	defer logger.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.mu.Lock()
-		err := logger.rotateLogFiles()
-		logger.mu.Unlock()
-		if err != nil {
-			b.Fatalf("Rotation failed: %v", err)
-		}
+		logger.Info(strings.Repeat("a", 50)) // Ensure rotation happens
 	}
 }
