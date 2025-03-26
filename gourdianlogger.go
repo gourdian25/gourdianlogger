@@ -114,8 +114,8 @@ func DefaultConfig() LoggerConfig {
 	}
 }
 
-// NewLogger creates a new configured logger instance
-func NewLogger(config LoggerConfig) (*Logger, error) {
+// NewGourdianLogger creates a new configured logger instance
+func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	// Apply defaults with validation
 	if config.MaxBytes <= 0 {
 		config.MaxBytes = defaultMaxBytes
@@ -480,7 +480,7 @@ func WithConfig(jsonConfig string) (*Logger, error) {
 	if err := json.Unmarshal([]byte(jsonConfig), &config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	return NewLogger(config)
+	return NewGourdianLogger(config)
 }
 
 // Flush ensures all buffered logs are written (for async mode)
