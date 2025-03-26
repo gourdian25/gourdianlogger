@@ -46,16 +46,16 @@ func ParseLogLevel(level string) (LogLevel, error) {
 }
 
 type Logger struct {
-	mu              sync.RWMutex
-	level           LogLevel
-	baseFilename    string
-	maxBytes        int64
-	backupCount     int
-	file            *os.File
-	multiWriter     io.Writer
-	bufferPool      *sync.Pool
-	timestampFormat string
-	outputs         []io.Writer
+	mu              sync.RWMutex // Ensures thread-safe logging operations
+	level           LogLevel     // Minimum log level to record
+	baseFilename    string       // Base name of the log file
+	maxBytes        int64        // Maximum size of log file before rotation
+	backupCount     int          // Number of backup files to keep
+	file            *os.File     // Current log file handle
+	multiWriter     io.Writer    // Writes to multiple outputs (e.g., console, file)
+	bufferPool      *sync.Pool   // Pool of reusable buffers
+	timestampFormat string       // Customizable timestamp format
+	outputs         []io.Writer  // Additional outputs for logging
 }
 
 type LoggerConfig struct {
@@ -119,6 +119,56 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 
 	return logger, nil
 }
+
+func (l *Logger) SetLogLevel(level LogLevel) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.level = level
+}
+
+func (l *Logger) AddOutput(output io.Writer) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.outputs = append(l.outputs, output)
+	l.multiWriter = io.MultiWriter(l.outputs...)
+}
+
+func (l *Logger) formatLogMessage(level LogLevel, message string) string {
+	// Call at depth 4 to include more stack frames for proper caller identification
+	pc, file, line, ok := runtime.Caller(4)
+	if !ok {
+		file = "unknown"
+		line = 0
+	}
+
+	funcName := "unknown"
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		// Get the full function name
+		fullFunc := fn.Name()
+		// Extract just the function name without the package path
+		if lastSlash := strings.LastIndexByte(fullFunc, '/'); lastSlash >= 0 {
+			fullFunc = fullFunc[lastSlash+1:]
+		}
+		if lastDot := strings.LastIndexByte(fullFunc, '.'); lastDot >= 0 {
+			funcName = fullFunc[lastDot+1:]
+		} else {
+			funcName = fullFunc
+		}
+	}
+
+	file = filepath.Base(file)
+
+	now := time.Now()
+	return fmt.Sprintf("%s [%s] %s:%d (%s): %s\n",
+		now.Format(l.timestampFormat),
+		level,
+		file,
+		line,
+		funcName,
+		message,
+	)
+}
+
 func (l *Logger) log(level LogLevel, message string) {
 	if level < l.level {
 		return
@@ -138,17 +188,69 @@ func (l *Logger) log(level LogLevel, message string) {
 		fmt.Fprintf(os.Stderr, "Log rotation error: %v\n", err)
 	}
 
+	// Write to multi-writer and handle potential errors
 	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
+		// Since this is a logging error, we write directly to stderr
+		// We don't want to call l.log again as it could cause infinite recursion
 		fmt.Fprintf(os.Stderr, "Failed to write log message: %v\nOriginal message: %s", err, formattedMsg)
+
+		// For FATAL level logs, we still want to exit even if the write failed
 		if level == FATAL {
 			os.Exit(1)
 		}
 	}
 }
-func (l *Logger) SetLogLevel(level LogLevel) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.level = level
+
+func (l *Logger) checkFileSize() error {
+	fi, err := l.file.Stat()
+	if err != nil {
+		return err
+	}
+
+	if fi.Size() >= l.maxBytes {
+		return l.rotateLogFiles()
+	}
+
+	return nil
+}
+
+func (l *Logger) rotateLogFiles() error {
+	if err := l.file.Close(); err != nil {
+		return err
+	}
+
+	baseWithoutExt := strings.TrimSuffix(l.baseFilename, ".log")
+	currentTime := time.Now().Format("20060102_150405")
+	newLogFilePath := fmt.Sprintf("%s_%s.log", baseWithoutExt, currentTime)
+
+	if err := os.Rename(l.baseFilename, newLogFilePath); err != nil {
+		return err
+	}
+
+	backupFiles, _ := filepath.Glob(baseWithoutExt + "_*.log")
+
+	sort.Strings(backupFiles)
+
+	if len(backupFiles) > l.backupCount {
+		for _, oldFile := range backupFiles[:len(backupFiles)-l.backupCount] {
+			os.Remove(oldFile)
+		}
+	}
+
+	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	l.file = file
+
+	outputs := []io.Writer{os.Stdout, file}
+	if len(l.outputs) > 0 {
+		outputs = append(outputs, l.outputs[2:]...)
+	}
+	l.outputs = outputs
+	l.multiWriter = io.MultiWriter(outputs...)
+
+	return nil
 }
 
 func (l *Logger) Debug(v ...interface{}) {
@@ -197,96 +299,4 @@ func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.file.Close()
-}
-
-func (l *Logger) AddOutput(output io.Writer) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.outputs = append(l.outputs, output)
-	l.multiWriter = io.MultiWriter(l.outputs...)
-}
-
-func (l *Logger) formatLogMessage(level LogLevel, message string) string {
-	pc, file, line, ok := runtime.Caller(4)
-	if !ok {
-		file = "unknown"
-		line = 0
-	}
-
-	funcName := "unknown"
-	if fn := runtime.FuncForPC(pc); fn != nil {
-		fullFunc := fn.Name()
-		if lastSlash := strings.LastIndexByte(fullFunc, '/'); lastSlash >= 0 {
-			fullFunc = fullFunc[lastSlash+1:]
-		}
-		if lastDot := strings.LastIndexByte(fullFunc, '.'); lastDot >= 0 {
-			funcName = fullFunc[lastDot+1:]
-		} else {
-			funcName = fullFunc
-		}
-	}
-
-	file = filepath.Base(file)
-
-	now := time.Now()
-	return fmt.Sprintf("%s [%s] %s:%d (%s): %s\n",
-		now.Format(l.timestampFormat),
-		level,
-		file,
-		line,
-		funcName,
-		message,
-	)
-}
-
-func (l *Logger) checkFileSize() error {
-	fi, err := l.file.Stat()
-	if err != nil {
-		return err
-	}
-
-	if fi.Size() >= l.maxBytes {
-		return l.rotateLogFiles()
-	}
-
-	return nil
-}
-
-func (l *Logger) rotateLogFiles() error {
-	if err := l.file.Close(); err != nil {
-		return err
-	}
-
-	baseWithoutExt := strings.TrimSuffix(l.baseFilename, ".log")
-	currentTime := time.Now().Format("20060102_150405")
-	newLogFilePath := fmt.Sprintf("%s_%s.log", baseWithoutExt, currentTime)
-
-	if err := os.Rename(l.baseFilename, newLogFilePath); err != nil {
-		return err
-	}
-
-	backupFiles, _ := filepath.Glob(baseWithoutExt + "_*.log")
-
-	sort.Strings(backupFiles)
-
-	if len(backupFiles) > l.backupCount {
-		for _, oldFile := range backupFiles[:len(backupFiles)-l.backupCount] {
-			os.Remove(oldFile)
-		}
-	}
-
-	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	l.file = file
-
-	outputs := []io.Writer{os.Stdout, file}
-	if len(l.outputs) > 0 {
-		outputs = append(outputs, l.outputs[2:]...) // Skip stdout and previous file
-	}
-	l.outputs = outputs
-	l.multiWriter = io.MultiWriter(outputs...)
-
-	return nil
 }
