@@ -2,6 +2,7 @@ package gourdianlogger
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,11 +11,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // LogLevel represents the severity level of log messages
-type LogLevel int
+type LogLevel int32
 
 const (
 	DEBUG LogLevel = iota
@@ -26,11 +28,53 @@ const (
 
 var (
 	// Default values
-	defaultMaxBytes        int64 = 10 * 1024 * 1024 // 10MB
-	defaultBackupCount           = 5
-	defaultTimestampFormat       = "2006/01/02 15:04:05.000000"
-	defaultLogsDir               = "logs"
+	defaultMaxBytes        int64  = 10 * 1024 * 1024 // 10MB
+	defaultBackupCount     int    = 5
+	defaultTimestampFormat string = "2006-01-02 15:04:05.000000"
+	defaultLogsDir         string = "logs"
 )
+
+// LoggerConfig holds configuration for the logger
+type LoggerConfig struct {
+	Filename        string      `json:"filename"`         // Base filename for logs
+	MaxBytes        int64       `json:"max_bytes"`        // Max file size before rotation
+	BackupCount     int         `json:"backup_count"`     // Number of backups to keep
+	LogLevel        LogLevel    `json:"log_level"`        // Minimum log level
+	TimestampFormat string      `json:"timestamp_format"` // Custom timestamp format
+	Outputs         []io.Writer `json:"-"`                // Additional outputs (not JSON serializable)
+	LogsDir         string      `json:"logs_dir"`         // Directory for log files
+	EnableCaller    bool        `json:"enable_caller"`    // Include caller info
+	BufferSize      int         `json:"buffer_size"`      // Buffer size for async logging
+	AsyncWorkers    int         `json:"async_workers"`    // Number of async workers
+}
+
+// Logger is the main logging struct
+type Logger struct {
+	mu               sync.RWMutex   // Protects non-atomic operations
+	level            int32          // Atomic log level
+	baseFilename     string         // Base log file path
+	maxBytes         int64          // Max file size
+	backupCount      int            // Number of backups
+	file             *os.File       // Current log file
+	multiWriter      io.Writer      // Combined output
+	bufferPool       *sync.Pool     // Reusable buffers
+	timestampFormat  string         // Time format
+	outputs          []io.Writer    // All outputs
+	logsDir          string         // Log directory
+	closed           int32          // Atomic closed flag
+	rotateChan       chan struct{}  // Rotation signal
+	rotateCloseChan  chan struct{}  // Rotation stop signal
+	wg               sync.WaitGroup // Background ops
+	enableCaller     bool           // Include caller info
+	asyncQueue       chan *logEntry // Async logging queue
+	asyncCloseChan   chan struct{}  // Async stop signal
+	asyncWorkerCount int            // Number of async workers
+}
+
+type logEntry struct {
+	level   LogLevel
+	message string
+}
 
 // String returns the string representation of the LogLevel
 func (l LogLevel) String() string {
@@ -77,71 +121,24 @@ func NewLoggerConfig(
 	}
 }
 
-// DefaultLoggerConfig returns a LoggerConfig with default values.
-// This is useful when you want to start with sensible defaults and override specific fields.
+// DefaultConfig returns a LoggerConfig with default values
 func DefaultLoggerConfig() LoggerConfig {
 	return LoggerConfig{
-		Filename:        "gourdianlogger",
-		MaxBytes:        defaultMaxBytes, // 10MB
+		Filename:        "app",
+		MaxBytes:        defaultMaxBytes,
 		BackupCount:     defaultBackupCount,
 		LogLevel:        DEBUG,
 		TimestampFormat: defaultTimestampFormat,
-		Outputs:         nil,
 		LogsDir:         defaultLogsDir,
+		EnableCaller:    true,
+		BufferSize:      0, // Sync by default
+		AsyncWorkers:    1, // Default workers if async enabled
 	}
 }
 
-// NewLoggerConfigWithDefaults creates a new LoggerConfig with some parameters and defaults for others.
-// This provides flexibility to specify only the fields you care about.
-func NewLoggerConfigWithDefaults(
-	filename string,
-	logLevel LogLevel,
-	outputs []io.Writer,
-) LoggerConfig {
-	return LoggerConfig{
-		Filename:        filename,
-		MaxBytes:        defaultMaxBytes,
-		BackupCount:     defaultBackupCount,
-		LogLevel:        logLevel,
-		TimestampFormat: defaultTimestampFormat,
-		Outputs:         outputs,
-		LogsDir:         defaultLogsDir,
-	}
-}
-
-// LoggerConfig holds configuration for the logger
-type LoggerConfig struct {
-	Filename        string      // Base filename for logs (without extension)
-	MaxBytes        int64       // Maximum size before rotation (default 10MB)
-	BackupCount     int         // Number of backups to keep (default 5)
-	LogLevel        LogLevel    // Minimum log level (default DEBUG)
-	TimestampFormat string      // Custom timestamp format
-	Outputs         []io.Writer // Additional output destinations
-	LogsDir         string      // Directory to store log files (default "logs")
-}
-
-// Logger is the main logging struct
-type Logger struct {
-	mu              sync.RWMutex   // Ensures thread-safe operations
-	level           LogLevel       // Minimum log level to record
-	baseFilename    string         // Base name of the log file
-	maxBytes        int64          // Maximum size before rotation
-	backupCount     int            // Number of backups to keep
-	file            *os.File       // Current log file handle
-	multiWriter     io.Writer      // Writes to multiple outputs
-	bufferPool      *sync.Pool     // Pool of reusable buffers
-	timestampFormat string         // Timestamp format
-	outputs         []io.Writer    // Additional outputs
-	logsDir         string         // Directory for log files
-	closed          bool           // Track if logger is closed
-	rotateChan      chan struct{}  // Channel for rotation signals
-	rotateCloseChan chan struct{}  // Channel to stop rotation goroutine
-	wg              sync.WaitGroup // Wait group for background operations
-}
-
-// NewGourdianLogger creates a new logger instance
-func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
-	// Apply defaults
+// NewGourdianLogger creates a new configured logger instance
+func NewLogger(config LoggerConfig) (*Logger, error) {
+	// Apply defaults with validation
 	if config.MaxBytes <= 0 {
 		config.MaxBytes = defaultMaxBytes
 	}
@@ -154,45 +151,53 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	if config.LogsDir == "" {
 		config.LogsDir = defaultLogsDir
 	}
-
-	// Ensure logs directory exists
-	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create logs directory: %w", err)
-	}
-
-	// Clean and prepare filename
-	config.Filename = strings.TrimSpace(config.Filename)
 	if config.Filename == "" {
-		config.Filename = "gourdianlogger"
+		config.Filename = "app"
 	}
-	config.Filename = strings.TrimSuffix(config.Filename, ".log")
+	if config.AsyncWorkers <= 0 && config.BufferSize > 0 {
+		config.AsyncWorkers = 1
+	}
 
-	logFilePath := filepath.Join(config.LogsDir, config.Filename+".log")
+	// Clean filename and ensure directory exists
+	config.Filename = strings.TrimSpace(strings.TrimSuffix(config.Filename, ".log"))
+	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
 
-	// Open log file
-	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logPath := filepath.Join(config.LogsDir, config.Filename+".log")
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Prepare outputs
+	// Setup outputs with stdout and file as defaults
 	outputs := []io.Writer{os.Stdout, file}
 	if config.Outputs != nil {
 		outputs = append(outputs, config.Outputs...)
 	}
 
+	// Filter out nil writers
+	validOutputs := make([]io.Writer, 0, len(outputs))
+	for _, w := range outputs {
+		if w != nil {
+			validOutputs = append(validOutputs, w)
+		}
+	}
+
 	logger := &Logger{
-		baseFilename:    logFilePath,
-		maxBytes:        config.MaxBytes,
-		backupCount:     config.BackupCount,
-		file:            file,
-		level:           config.LogLevel,
-		multiWriter:     io.MultiWriter(outputs...),
-		timestampFormat: config.TimestampFormat,
-		outputs:         outputs,
-		logsDir:         config.LogsDir,
-		rotateChan:      make(chan struct{}, 1),
-		rotateCloseChan: make(chan struct{}),
+		level:            int32(config.LogLevel),
+		baseFilename:     logPath,
+		maxBytes:         config.MaxBytes,
+		backupCount:      config.BackupCount,
+		file:             file,
+		multiWriter:      io.MultiWriter(validOutputs...),
+		timestampFormat:  config.TimestampFormat,
+		outputs:          validOutputs,
+		logsDir:          config.LogsDir,
+		rotateChan:       make(chan struct{}, 1),
+		rotateCloseChan:  make(chan struct{}),
+		enableCaller:     config.EnableCaller,
+		asyncWorkerCount: config.AsyncWorkers,
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return new(bytes.Buffer)
@@ -200,139 +205,25 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		},
 	}
 
-	// Start background rotation checker
+	// Start background workers
 	logger.wg.Add(1)
-	go logger.rotationChecker()
+	go logger.rotationWorker()
+
+	// Setup async logging if enabled
+	if config.BufferSize > 0 {
+		logger.asyncQueue = make(chan *logEntry, config.BufferSize)
+		logger.asyncCloseChan = make(chan struct{})
+
+		for i := 0; i < logger.asyncWorkerCount; i++ {
+			logger.wg.Add(1)
+			go logger.asyncWorker()
+		}
+	}
 
 	return logger, nil
 }
 
-// SetLogLevel changes the minimum log level
-func (l *Logger) SetLogLevel(level LogLevel) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.level = level
-}
-
-// GetLogLevel returns the current log level
-func (l *Logger) GetLogLevel() LogLevel {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.level
-}
-
-// AddOutput adds a new output destination
-func (l *Logger) AddOutput(output io.Writer) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.closed {
-		return
-	}
-
-	l.outputs = append(l.outputs, output)
-	l.multiWriter = io.MultiWriter(l.outputs...)
-}
-
-// RemoveOutput removes an output destination
-func (l *Logger) RemoveOutput(output io.Writer) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.closed {
-		return
-	}
-
-	for i, w := range l.outputs {
-		if w == output {
-			l.outputs = append(l.outputs[:i], l.outputs[i+1:]...)
-			break
-		}
-	}
-	l.multiWriter = io.MultiWriter(l.outputs...)
-}
-
-// formatLogMessage formats a log message with timestamp, level, caller info
-func (l *Logger) formatLogMessage(level LogLevel, message string) string {
-	// Get caller info (4 levels up the stack)
-	pc, file, line, ok := runtime.Caller(4)
-	if !ok {
-		file = "unknown"
-		line = 0
-	}
-
-	// Extract function name
-	funcName := "unknown"
-	if fn := runtime.FuncForPC(pc); fn != nil {
-		fullFunc := fn.Name()
-		// Simplify package path
-		if lastSlash := strings.LastIndex(fullFunc, "/"); lastSlash >= 0 {
-			fullFunc = fullFunc[lastSlash+1:]
-		}
-		// Extract just the function name
-		if lastDot := strings.LastIndex(fullFunc, "."); lastDot >= 0 {
-			funcName = fullFunc[lastDot+1:]
-		} else {
-			funcName = fullFunc
-		}
-	}
-
-	// Simplify file path
-	file = filepath.Base(file)
-
-	// Format the message
-	return fmt.Sprintf("%s [%s] %s:%d (%s): %s\n",
-		time.Now().Format(l.timestampFormat),
-		level,
-		file,
-		line,
-		funcName,
-		message,
-	)
-}
-
-// log is the internal logging function
-func (l *Logger) log(level LogLevel, message string) {
-	// Check log level first without lock for performance
-	if level < l.GetLogLevel() {
-		return
-	}
-
-	// Format the message
-	formattedMsg := l.formatLogMessage(level, message)
-
-	// Get buffer from pool
-	buf := l.bufferPool.Get().(*bytes.Buffer)
-	defer l.bufferPool.Put(buf)
-	buf.Reset()
-	buf.WriteString(formattedMsg)
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Check if logger is closed
-	if l.closed {
-		fmt.Fprintf(os.Stderr, "Logger is closed. Message: %s", formattedMsg)
-		return
-	}
-
-	// Check file size and rotate if needed
-	if err := l.checkFileSize(); err != nil {
-		fmt.Fprintf(os.Stderr, "Log rotation error: %v\n", err)
-	}
-
-	// Write to all outputs
-	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write log message: %v\nOriginal message: %s", err, formattedMsg)
-	}
-
-	// For FATAL logs, exit after writing
-	if level == FATAL {
-		os.Exit(1)
-	}
-}
-
-// checkFileSize checks if the log file needs rotation
+// rotationWorker handles log file rotation in the background
 func (l *Logger) checkFileSize() error {
 	fi, err := l.file.Stat()
 	if err != nil {
@@ -351,8 +242,7 @@ func (l *Logger) checkFileSize() error {
 	return nil
 }
 
-// rotationChecker runs in background to handle rotations
-func (l *Logger) rotationChecker() {
+func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
 
 	for {
@@ -366,6 +256,101 @@ func (l *Logger) rotationChecker() {
 		case <-l.rotateCloseChan:
 			return
 		}
+	}
+}
+
+// asyncWorker processes log entries asynchronously
+func (l *Logger) asyncWorker() {
+	defer l.wg.Done()
+
+	for {
+		select {
+		case entry := <-l.asyncQueue:
+			l.processLogEntry(entry.level, entry.message)
+		case <-l.asyncCloseChan:
+			// Drain remaining messages
+			for {
+				select {
+				case entry := <-l.asyncQueue:
+					l.processLogEntry(entry.level, entry.message)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+// processLogEntry handles the core logging logic
+func (l *Logger) processLogEntry(level LogLevel, message string) {
+	if level < LogLevel(atomic.LoadInt32(&l.level)) {
+		return
+	}
+
+	buf := l.bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer l.bufferPool.Put(buf)
+
+	buf.WriteString(l.formatMessage(level, message))
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if atomic.LoadInt32(&l.closed) == 1 {
+		fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
+		return
+	}
+
+	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
+		fmt.Fprintf(os.Stderr, "Log write error: %v\n", err)
+	}
+
+	if level == FATAL {
+		os.Exit(1)
+	}
+}
+
+// formatMessage formats the log message with all metadata
+func (l *Logger) formatMessage(level LogLevel, message string) string {
+	var callerInfo string
+	if l.enableCaller {
+		pc, file, line, ok := runtime.Caller(3) // Adjusted depth for wrapper methods
+		if ok {
+			funcName := "unknown"
+			if fn := runtime.FuncForPC(pc); fn != nil {
+				name := fn.Name()
+				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
+					name = name[lastSlash+1:]
+				}
+				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
+					funcName = name[lastDot+1:]
+				} else {
+					funcName = name
+				}
+			}
+			callerInfo = fmt.Sprintf("%s:%d(%s) ", filepath.Base(file), line, funcName)
+		}
+	}
+
+	return fmt.Sprintf("%s [%s] %s%s",
+		time.Now().Format(l.timestampFormat),
+		level,
+		callerInfo,
+		message,
+	)
+}
+
+// log is the internal logging function that routes to sync or async
+func (l *Logger) log(level LogLevel, message string) {
+	if l.asyncQueue != nil {
+		select {
+		case l.asyncQueue <- &logEntry{level, message}:
+		default:
+			// Fallback to synchronous if buffer is full
+			l.processLogEntry(level, message)
+		}
+	} else {
+		l.processLogEntry(level, message)
 	}
 }
 
@@ -424,6 +409,70 @@ func (l *Logger) rotateLogFiles() error {
 	return nil
 }
 
+// SetLogLevel changes the minimum log level
+func (l *Logger) SetLogLevel(level LogLevel) {
+	atomic.StoreInt32(&l.level, int32(level))
+}
+
+// GetLogLevel returns the current log level
+func (l *Logger) GetLogLevel() LogLevel {
+	return LogLevel(atomic.LoadInt32(&l.level))
+}
+
+// AddOutput adds a new output destination
+func (l *Logger) AddOutput(output io.Writer) {
+	if output == nil {
+		return
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if atomic.LoadInt32(&l.closed) == 1 {
+		return
+	}
+
+	l.outputs = append(l.outputs, output)
+	l.multiWriter = io.MultiWriter(l.outputs...)
+}
+
+// RemoveOutput removes an output destination
+func (l *Logger) RemoveOutput(output io.Writer) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if atomic.LoadInt32(&l.closed) == 1 {
+		return
+	}
+
+	for i, w := range l.outputs {
+		if w == output {
+			l.outputs = append(l.outputs[:i], l.outputs[i+1:]...)
+			break
+		}
+	}
+	l.multiWriter = io.MultiWriter(l.outputs...)
+}
+
+// Close cleanly shuts down the logger
+func (l *Logger) Close() error {
+	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
+		return nil // Already closed
+	}
+
+	// Stop background workers
+	close(l.rotateCloseChan)
+	if l.asyncCloseChan != nil {
+		close(l.asyncCloseChan)
+	}
+	l.wg.Wait()
+
+	// Close file and clean up
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.file.Close()
+}
+
 // Logging methods
 
 func (l *Logger) Debug(v ...interface{}) {
@@ -466,22 +515,26 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...))
 }
 
-// Close cleanly shuts down the logger
-func (l *Logger) Close() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.closed {
-		return nil
+// WithConfig creates a new logger from JSON config
+func WithConfig(jsonConfig string) (*Logger, error) {
+	var config LoggerConfig
+	if err := json.Unmarshal([]byte(jsonConfig), &config); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+	return NewLogger(config)
+}
 
-	// Stop rotation goroutine
-	close(l.rotateCloseChan)
-	l.wg.Wait()
+// Flush ensures all buffered logs are written (for async mode)
+func (l *Logger) Flush() {
+	if l.asyncQueue != nil {
+		// Wait for queue to drain
+		for len(l.asyncQueue) > 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
 
-	// Close the log file
-	err := l.file.Close()
-	l.closed = true
-
-	return err
+// Check if logger is closed
+func (l *Logger) IsClosed() bool {
+	return atomic.LoadInt32(&l.closed) == 1
 }
