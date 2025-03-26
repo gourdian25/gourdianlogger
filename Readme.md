@@ -292,6 +292,3 @@ GourdianLogger is licensed under the MIT License. See the [LICENSE](https://gith
 
 Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/gourdian25/gourdianlogger).
 
----
-
-This `README.md` provides a comprehensive guide to using GourdianLogger, from installation to advanced features. Let me know if you need further adjustments!
