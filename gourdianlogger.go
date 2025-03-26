@@ -51,17 +51,17 @@ type LoggerConfig struct {
 // Logger is the main logging struct
 type Logger struct {
 	mu               sync.RWMutex   // Protects non-atomic operations
-	level            int32          // Atomic log level
+	level            atomic.Int32   // Atomic log level
 	baseFilename     string         // Base log file path
 	maxBytes         int64          // Max file size
 	backupCount      int            // Number of backups
 	file             *os.File       // Current log file
 	multiWriter      io.Writer      // Combined output
-	bufferPool       *sync.Pool     // Reusable buffers
+	bufferPool       sync.Pool      // Reusable buffers
 	timestampFormat  string         // Time format
 	outputs          []io.Writer    // All outputs
 	logsDir          string         // Log directory
-	closed           int32          // Atomic closed flag
+	closed           atomic.Bool    // Atomic closed flag
 	rotateChan       chan struct{}  // Rotation signal
 	rotateCloseChan  chan struct{}  // Rotation stop signal
 	wg               sync.WaitGroup // Background ops
@@ -99,30 +99,8 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
-// NewLoggerConfig creates a new LoggerConfig with all parameters.
-// This is the full constructor that requires all fields to be specified.
-func NewLoggerConfig(
-	filename string,
-	maxBytes int64,
-	backupCount int,
-	logLevel LogLevel,
-	timestampFormat string,
-	outputs []io.Writer,
-	logsDir string,
-) LoggerConfig {
-	return LoggerConfig{
-		Filename:        filename,
-		MaxBytes:        maxBytes,
-		BackupCount:     backupCount,
-		LogLevel:        logLevel,
-		TimestampFormat: timestampFormat,
-		Outputs:         outputs,
-		LogsDir:         logsDir,
-	}
-}
-
 // DefaultConfig returns a LoggerConfig with default values
-func DefaultLoggerConfig() LoggerConfig {
+func DefaultConfig() LoggerConfig {
 	return LoggerConfig{
 		Filename:        "app",
 		MaxBytes:        defaultMaxBytes,
@@ -136,7 +114,7 @@ func DefaultLoggerConfig() LoggerConfig {
 	}
 }
 
-// NewGourdianLogger creates a new configured logger instance
+// NewLogger creates a new configured logger instance
 func NewLogger(config LoggerConfig) (*Logger, error) {
 	// Apply defaults with validation
 	if config.MaxBytes <= 0 {
@@ -185,12 +163,10 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 	}
 
 	logger := &Logger{
-		level:            int32(config.LogLevel),
 		baseFilename:     logPath,
 		maxBytes:         config.MaxBytes,
 		backupCount:      config.BackupCount,
 		file:             file,
-		multiWriter:      io.MultiWriter(validOutputs...),
 		timestampFormat:  config.TimestampFormat,
 		outputs:          validOutputs,
 		logsDir:          config.LogsDir,
@@ -198,11 +174,12 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 		rotateCloseChan:  make(chan struct{}),
 		enableCaller:     config.EnableCaller,
 		asyncWorkerCount: config.AsyncWorkers,
-		bufferPool: &sync.Pool{
-			New: func() interface{} {
-				return new(bytes.Buffer)
-			},
-		},
+	}
+
+	logger.level.Store(int32(config.LogLevel))
+	logger.multiWriter = io.MultiWriter(validOutputs...)
+	logger.bufferPool.New = func() interface{} {
+		return new(bytes.Buffer)
 	}
 
 	// Start background workers
@@ -223,7 +200,7 @@ func NewLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-// rotationWorker handles log file rotation in the background
+// checkFileSize checks if log rotation is needed
 func (l *Logger) checkFileSize() error {
 	fi, err := l.file.Stat()
 	if err != nil {
@@ -231,17 +208,16 @@ func (l *Logger) checkFileSize() error {
 	}
 
 	if fi.Size() >= l.maxBytes {
-		// Signal rotation through channel (non-blocking)
 		select {
 		case l.rotateChan <- struct{}{}:
 		default:
 			// Rotation already pending
 		}
 	}
-
 	return nil
 }
 
+// rotationWorker handles log file rotation in the background
 func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
 
@@ -283,7 +259,7 @@ func (l *Logger) asyncWorker() {
 
 // processLogEntry handles the core logging logic
 func (l *Logger) processLogEntry(level LogLevel, message string) {
-	if level < LogLevel(atomic.LoadInt32(&l.level)) {
+	if level < l.GetLogLevel() {
 		return
 	}
 
@@ -296,7 +272,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if atomic.LoadInt32(&l.closed) == 1 {
+	if l.closed.Load() {
 		fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
 		return
 	}
@@ -332,7 +308,7 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 		}
 	}
 
-	return fmt.Sprintf("%s [%s] %s%s",
+	return fmt.Sprintf("%s [%s] %s%s\n",
 		time.Now().Format(l.timestampFormat),
 		level,
 		callerInfo,
@@ -411,12 +387,12 @@ func (l *Logger) rotateLogFiles() error {
 
 // SetLogLevel changes the minimum log level
 func (l *Logger) SetLogLevel(level LogLevel) {
-	atomic.StoreInt32(&l.level, int32(level))
+	l.level.Store(int32(level))
 }
 
 // GetLogLevel returns the current log level
 func (l *Logger) GetLogLevel() LogLevel {
-	return LogLevel(atomic.LoadInt32(&l.level))
+	return LogLevel(l.level.Load())
 }
 
 // AddOutput adds a new output destination
@@ -428,7 +404,7 @@ func (l *Logger) AddOutput(output io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if atomic.LoadInt32(&l.closed) == 1 {
+	if l.closed.Load() {
 		return
 	}
 
@@ -441,22 +417,22 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if atomic.LoadInt32(&l.closed) == 1 {
+	if l.closed.Load() {
 		return
 	}
 
 	for i, w := range l.outputs {
 		if w == output {
 			l.outputs = append(l.outputs[:i], l.outputs[i+1:]...)
-			break
+			l.multiWriter = io.MultiWriter(l.outputs...)
+			return
 		}
 	}
-	l.multiWriter = io.MultiWriter(l.outputs...)
 }
 
 // Close cleanly shuts down the logger
 func (l *Logger) Close() error {
-	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
+	if !l.closed.CompareAndSwap(false, true) {
 		return nil // Already closed
 	}
 
@@ -534,7 +510,7 @@ func (l *Logger) Flush() {
 	}
 }
 
-// Check if logger is closed
+// IsClosed checks if logger is closed
 func (l *Logger) IsClosed() bool {
-	return atomic.LoadInt32(&l.closed) == 1
+	return l.closed.Load()
 }
