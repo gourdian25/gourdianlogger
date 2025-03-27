@@ -36,6 +36,9 @@ func main() {
 	// 	time.Sleep(500 * time.Millisecond)
 	// }
 
+	// // Create the json_logs directory first to ensure it exists
+	// // os.MkdirAll("json_logs", 0755)
+
 	simpleLoggerExample()
 }
 
@@ -52,7 +55,6 @@ func simpleLoggerExample() {
 	logger.Warn("Warning message")
 	logger.Error("Error message")
 	logger.Infof("Formatted message at %s", time.Now().Format(time.RFC3339))
-
 }
 
 func customLoggerExample() {

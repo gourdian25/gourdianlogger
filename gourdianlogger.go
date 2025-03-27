@@ -365,7 +365,8 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) s
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) formatCLF(level LogLevel, message string) string {
+// Update all format functions to accept callerInfo
+func (l *Logger) formatCLF(level LogLevel, message string, callerInfo string) string {
 	// Common Log Format: host ident authuser date request status bytes
 	// Simplified version for general logging
 	return fmt.Sprintf("%s - - [%s] %q %s\n",
@@ -376,8 +377,7 @@ func (l *Logger) formatCLF(level LogLevel, message string) string {
 	)
 }
 
-// Update all other format methods to use getCallerInfo with proper skip
-func (l *Logger) formatGELF(level LogLevel, message string) string {
+func (l *Logger) formatGELF(level LogLevel, message string, callerInfo string) string {
 	gelf := map[string]interface{}{
 		"version":       "1.1",
 		"host":          "localhost",
@@ -386,10 +386,8 @@ func (l *Logger) formatGELF(level LogLevel, message string) string {
 		"level":         int32(level),
 	}
 
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			gelf["_caller"] = caller
-		}
+	if l.enableCaller && callerInfo != "" {
+		gelf["_caller"] = callerInfo
 	}
 
 	jsonData, err := json.Marshal(gelf)
@@ -424,7 +422,7 @@ func (l *Logger) formatLogfmt(level LogLevel, message string, callerInfo string)
 	return strings.TrimSpace(buf.String()) + "\n"
 }
 
-func (l *Logger) formatCSV(level LogLevel, message string) string {
+func (l *Logger) formatCSV(level LogLevel, message string, callerInfo string) string {
 	var buf strings.Builder
 
 	if l.formatConfig.CSVHeaders && !l.csvHeadersWritten {
@@ -442,16 +440,14 @@ func (l *Logger) formatCSV(level LogLevel, message string) string {
 	buf.WriteString(fmt.Sprintf("%q%c", message, l.formatConfig.CSVDelimiter))
 
 	// Caller info
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			buf.WriteString(fmt.Sprintf("%q", caller))
-		}
+	if l.enableCaller && callerInfo != "" {
+		buf.WriteString(fmt.Sprintf("%q", callerInfo))
 	}
 
 	return buf.String() + "\n"
 }
 
-func (l *Logger) formatXML(level LogLevel, message string) string {
+func (l *Logger) formatXML(level LogLevel, message string, callerInfo string) string {
 	type LogEntry struct {
 		Timestamp string                 `xml:"timestamp"`
 		Level     string                 `xml:"level"`
@@ -467,10 +463,8 @@ func (l *Logger) formatXML(level LogLevel, message string) string {
 		Custom:    l.formatConfig.CustomFields,
 	}
 
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			entry.Caller = caller
-		}
+	if l.enableCaller && callerInfo != "" {
+		entry.Caller = callerInfo
 	}
 
 	var xmlData []byte
@@ -489,30 +483,24 @@ func (l *Logger) formatXML(level LogLevel, message string) string {
 	return string(xmlData) + "\n"
 }
 
-func (l *Logger) formatCEF(level LogLevel, message string) string {
+func (l *Logger) formatCEF(level LogLevel, message string, callerInfo string) string {
 	// Common Event Format for security logging
-	return fmt.Sprintf("CEF:0|GourdianLogger|Logger|1.0|%d|%s|%d|%s\n",
-		level,
-		message,
-		time.Now().Unix(),
-		l.getCEFExtensions(),
-	)
-}
-
-func (l *Logger) getCEFExtensions() string {
 	var exts []string
 
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			exts = append(exts, fmt.Sprintf("cs1=%s", caller))
-		}
+	if l.enableCaller && callerInfo != "" {
+		exts = append(exts, fmt.Sprintf("cs1=%s", callerInfo))
 	}
 
 	for k, v := range l.formatConfig.CustomFields {
 		exts = append(exts, fmt.Sprintf("%s=%v", k, v))
 	}
 
-	return strings.Join(exts, " ")
+	return fmt.Sprintf("CEF:0|GourdianLogger|Logger|1.0|%d|%s|%d|%s\n",
+		level,
+		message,
+		time.Now().Unix(),
+		strings.Join(exts, " "),
+	)
 }
 
 func (l *Logger) getCallerInfo(skip int) string {
