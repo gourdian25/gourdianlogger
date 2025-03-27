@@ -282,13 +282,13 @@ func (l *Logger) asyncWorker() {
 	for {
 		select {
 		case entry := <-l.asyncQueue:
-			l.processLogEntry(entry.level, entry.message)
+			l.processLogEntry(entry.level, entry.message, entry.callerInfo)
 		case <-l.asyncCloseChan:
 			// Drain remaining messages
 			for {
 				select {
 				case entry := <-l.asyncQueue:
-					l.processLogEntry(entry.level, entry.message)
+					l.processLogEntry(entry.level, entry.message, entry.callerInfo)
 				default:
 					return
 				}
@@ -342,8 +342,7 @@ func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) 
 	)
 }
 
-// formatJSON now uses getCallerInfo with proper skip
-func (l *Logger) formatJSON(level LogLevel, message string) string {
+func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) string {
 	logEntry := struct {
 		Timestamp string `json:"timestamp"`
 		Level     string `json:"level"`
@@ -355,10 +354,8 @@ func (l *Logger) formatJSON(level LogLevel, message string) string {
 		Message:   message,
 	}
 
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			logEntry.Caller = caller
-		}
+	if l.enableCaller && callerInfo != "" {
+		logEntry.Caller = callerInfo
 	}
 
 	jsonData, err := json.Marshal(logEntry)
@@ -402,7 +399,7 @@ func (l *Logger) formatGELF(level LogLevel, message string) string {
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) formatLogfmt(level LogLevel, message string) string {
+func (l *Logger) formatLogfmt(level LogLevel, message string, callerInfo string) string {
 	var buf strings.Builder
 
 	// Timestamp
@@ -415,10 +412,8 @@ func (l *Logger) formatLogfmt(level LogLevel, message string) string {
 	buf.WriteString(fmt.Sprintf("msg=%q ", message))
 
 	// Caller info
-	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
-			buf.WriteString(fmt.Sprintf("caller=%q ", caller))
-		}
+	if l.enableCaller && callerInfo != "" {
+		buf.WriteString(fmt.Sprintf("caller=%q ", callerInfo))
 	}
 
 	// Custom fields
@@ -547,32 +542,38 @@ func (l *Logger) getCallerInfo(skip int) string {
 	return fmt.Sprintf("%s:%d:%s", fileName, line, fnName)
 }
 
-func (l *Logger) formatMessage(level LogLevel, message string) string {
+func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string) string {
 	switch l.format {
 	case FormatJSON:
-		return l.formatJSON(level, message)
+		return l.formatJSON(level, message, callerInfo)
 	case FormatCLF:
-		return l.formatCLF(level, message)
+		return l.formatCLF(level, message, callerInfo)
 	case FormatGELF:
-		return l.formatGELF(level, message)
+		return l.formatGELF(level, message, callerInfo)
 	case FormatLogfmt:
-		return l.formatLogfmt(level, message)
+		return l.formatLogfmt(level, message, callerInfo)
 	case FormatCSV:
-		return l.formatCSV(level, message)
+		return l.formatCSV(level, message, callerInfo)
 	case FormatXML:
-		return l.formatXML(level, message)
+		return l.formatXML(level, message, callerInfo)
 	case FormatCEF:
-		return l.formatCEF(level, message)
+		return l.formatCEF(level, message, callerInfo)
 	default:
-		return l.formatPlain(level, message)
+		return l.formatPlain(level, message, callerInfo)
 	}
 }
 
 func (l *Logger) log(level LogLevel, message string) {
-	// Get caller info before processing (skip 4 frames to get to actual caller)
+	// Calculate skip count:
+	// 1. runtime.Caller
+	// 2. This function (log)
+	// 3. The public logging method (Debug, Info, etc.)
+	// 4. The actual caller
+	const skip = 4
+
 	var callerInfo string
 	if l.enableCaller {
-		callerInfo = l.getCallerInfo(4) // Adjusted skip count
+		callerInfo = l.getCallerInfo(skip)
 	}
 
 	if l.asyncQueue != nil {
