@@ -13,9 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/lucasb-eyer/go-colorful"
 )
 
 // LogLevel represents the severity level of log messages
@@ -37,77 +34,6 @@ var (
 	defaultLogsDir         string = "logs"
 )
 
-// Color palette for the logger
-var (
-	// Base colors
-	subtle  = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
-	special = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
-	warning = lipgloss.AdaptiveColor{Light: "#FFA500", Dark: "#FFA500"}
-	danger  = lipgloss.AdaptiveColor{Light: "#FF5F87", Dark: "#FF0000"}
-	cream   = lipgloss.Color("#FFF7DB")
-	pink    = lipgloss.Color("#F25D94")
-	purple  = lipgloss.Color("#A550DF")
-
-	// Style definitions
-	debugStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7D56F4")).
-			Bold(true)
-	infoStyle = lipgloss.NewStyle().
-			Foreground(special).
-			Bold(true)
-	warnStyle = lipgloss.NewStyle().
-			Foreground(warning).
-			Bold(true)
-	errorStyle = lipgloss.NewStyle().
-			Foreground(danger).
-			Bold(true)
-	fatalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(danger).
-			Bold(true).
-			Blink(true)
-	timestampStyle = lipgloss.NewStyle().
-			Foreground(subtle)
-	callerStyle = lipgloss.NewStyle().
-			Foreground(purple)
-	messageStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA"))
-
-	// Banner styles
-	bannerStyle = lipgloss.NewStyle().
-			Foreground(pink).
-			Background(cream).
-			Margin(1, 0, 1, 0)
-	titleStyle = lipgloss.NewStyle().
-			MarginLeft(1).
-			MarginRight(5).
-			Padding(0, 1).
-			Italic(true).
-			Foreground(cream).
-			Background(pink)
-	divider = lipgloss.NewStyle().
-		SetString("•").
-		Padding(0, 1).
-		Foreground(subtle).
-		String()
-)
-
-// Change the blends definition to use colorful.Color instead of color.Color
-var blends = func() []colorful.Color {
-	// Create a gradient between two colors
-	from, _ := colorful.Hex("#F25D94")
-	to, _ := colorful.Hex("#EDFF82")
-
-	// Generate 50 steps between these colors
-	steps := 50
-	gradient := make([]colorful.Color, steps)
-	for i := 0; i < steps; i++ {
-		t := float64(i) / float64(steps-1)
-		gradient[i] = from.BlendHcl(to, t).Clamped()
-	}
-	return gradient
-}()
-
 // LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
 	Filename        string      `json:"filename"`         // Base filename for logs
@@ -120,9 +46,7 @@ type LoggerConfig struct {
 	EnableCaller    bool        `json:"enable_caller"`    // Include caller info
 	BufferSize      int         `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int         `json:"async_workers"`    // Number of async workers
-	EnableColor     bool        `json:"enable_color"`     // Enable colored output
 	ShowBanner      bool        `json:"show_banner"`      // Show banner on initialization
-	Theme           string      `json:"theme"`            // Color theme (light/dark/custom)
 }
 
 // Logger is the main logging struct
@@ -146,45 +70,6 @@ type Logger struct {
 	asyncQueue       chan *logEntry // Async logging queue
 	asyncCloseChan   chan struct{}  // Async stop signal
 	asyncWorkerCount int            // Number of async workers
-	enableColor      bool           // Enable colored output
-}
-
-// colorWriter is a custom writer that applies color to console output
-type colorWriter struct{}
-
-func (w colorWriter) Write(p []byte) (n int, err error) {
-	// For the console, we'll let the formatMessage function handle coloring
-	return os.Stdout.Write(p)
-}
-
-// showBanner displays the cute cat banner with colorful styling
-func (l *Logger) showBanner() {
-	title := titleStyle.Render(" Gourdian Logger ")
-	url := lipgloss.NewStyle().Foreground(special).Render("github.com/yourusername/gourdianlogger")
-
-	desc := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(subtle).Render("Elegant and colorful logging for Go"),
-		lipgloss.NewStyle().Foreground(subtle).Render("From YourName"+divider+url),
-	)
-
-	header := lipgloss.JoinHorizontal(lipgloss.Top, title, desc)
-
-	cat := `
-╭──────────────────────────────────────────────────╮
-│                                                  │
-│` + lipgloss.PlaceHorizontal(38, lipgloss.Center, "🐱 "+rainbow("Welcome to Gourdian Logger!", blends)) + `│
-│                                                  │
-╰──────────────────────────────────────────────────╯
-`
-
-	// Combine all elements
-	banner := lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		bannerStyle.Render(cat),
-	)
-
-	// Print the banner to stdout (not to log files)
-	fmt.Println(banner)
 }
 
 type logEntry struct {
@@ -227,7 +112,6 @@ func DefaultConfig() LoggerConfig {
 		EnableCaller:    true,
 		BufferSize:      0,    // Sync by default
 		AsyncWorkers:    1,    // Default workers if async enabled
-		EnableColor:     true, // Color enabled by default
 		ShowBanner:      true, // Show banner by default
 	}
 }
@@ -267,13 +151,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	}
 
 	// Setup outputs with stdout and file as defaults
-	outputs := []io.Writer{file} // File always first
-	if config.EnableColor {
-		outputs = append(outputs, colorWriter{}) // Our custom color writer for console
-	} else {
-		outputs = append(outputs, os.Stdout) // Plain stdout if color disabled
-	}
-
+	outputs := []io.Writer{file, os.Stdout} // File and stdout
 	if config.Outputs != nil {
 		outputs = append(outputs, config.Outputs...)
 	}
@@ -298,7 +176,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		rotateCloseChan:  make(chan struct{}),
 		enableCaller:     config.EnableCaller,
 		asyncWorkerCount: config.AsyncWorkers,
-		enableColor:      config.EnableColor,
 	}
 
 	logger.level.Store(int32(config.LogLevel))
@@ -321,11 +198,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 			go logger.asyncWorker()
 		}
 	}
-
-	// // Show banner if enabled
-	// if config.ShowBanner {
-	// 	logger.showBanner()
-	// }
 
 	return logger, nil
 }
@@ -399,44 +271,13 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// Update the rainbow function to use colorful.Color
-func rainbow(text string, colors []colorful.Color) string {
-	var result strings.Builder
-	for i, r := range text {
-		color := colors[i%len(colors)]
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color.Hex()))
-		result.WriteString(style.Render(string(r)))
-	}
-	return result.String()
-}
-
-// formatMessage formats the log message with all metadata and color
+// formatMessage formats the log message with all metadata
 func (l *Logger) formatMessage(level LogLevel, message string) string {
 	var (
-		levelStr     string
+		levelStr     = fmt.Sprintf("%-5s", level.String())
 		callerInfo   string
 		timestampStr = time.Now().Format(l.timestampFormat)
 	)
-
-	// Apply color to level if enabled
-	if l.enableColor {
-		switch level {
-		case DEBUG:
-			levelStr = debugStyle.Render(fmt.Sprintf("%-5s", level.String()))
-		case INFO:
-			levelStr = infoStyle.Render(fmt.Sprintf("%-5s", level.String()))
-		case WARN:
-			levelStr = warnStyle.Render(fmt.Sprintf("%-5s", level.String()))
-		case ERROR:
-			levelStr = errorStyle.Render(fmt.Sprintf("%-5s", level.String()))
-		case FATAL:
-			levelStr = fatalStyle.Render(fmt.Sprintf("%-5s", level.String()))
-		}
-		timestampStr = timestampStyle.Render(timestampStr)
-		message = messageStyle.Render(message)
-	} else {
-		levelStr = fmt.Sprintf("%-5s", level.String())
-	}
 
 	// Get caller info if enabled
 	if l.enableCaller {
@@ -454,41 +295,8 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 					funcName = name
 				}
 			}
-			callerInfo = fmt.Sprintf("%s:%d(%s)", filepath.Base(file), line, funcName)
-			if l.enableColor {
-				callerInfo = callerStyle.Render(callerInfo) + " "
-			} else {
-				callerInfo = callerInfo + " "
-			}
+			callerInfo = fmt.Sprintf("%s:%d(%s) ", filepath.Base(file), line, funcName)
 		}
-	}
-
-	// Create a colorful box for the message
-	if l.enableColor {
-		var boxStyle lipgloss.Style
-		switch level {
-		case DEBUG:
-			boxStyle = lipgloss.NewStyle().
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#7D56F4")).
-				Padding(0, 1)
-		case INFO:
-			boxStyle = lipgloss.NewStyle().
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(special).
-				Padding(0, 1)
-		case WARN:
-			boxStyle = lipgloss.NewStyle().
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(warning).
-				Padding(0, 1)
-		case ERROR, FATAL:
-			boxStyle = lipgloss.NewStyle().
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(danger).
-				Padding(0, 1)
-		}
-		message = boxStyle.Render(message)
 	}
 
 	return fmt.Sprintf("%s [%s] %s%s\n",
