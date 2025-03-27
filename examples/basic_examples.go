@@ -52,6 +52,7 @@ func simpleLoggerExample() {
 	logger.Warn("Warning message")
 	logger.Error("Error message")
 	logger.Infof("Formatted message at %s", time.Now().Format(time.RFC3339))
+
 }
 
 func customLoggerExample() {

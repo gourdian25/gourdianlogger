@@ -362,7 +362,7 @@ func (l *Logger) formatJSON(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			logEntry.Caller = caller
 		}
 	}
@@ -396,7 +396,7 @@ func (l *Logger) formatGELF(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			gelf["_caller"] = caller
 		}
 	}
@@ -422,7 +422,7 @@ func (l *Logger) formatLogfmt(level LogLevel, message string) string {
 
 	// Caller info
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			buf.WriteString(fmt.Sprintf("caller=%q ", caller))
 		}
 	}
@@ -454,7 +454,7 @@ func (l *Logger) formatCSV(level LogLevel, message string) string {
 
 	// Caller info
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			buf.WriteString(fmt.Sprintf("%q", caller))
 		}
 	}
@@ -479,7 +479,7 @@ func (l *Logger) formatXML(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			entry.Caller = caller
 		}
 	}
@@ -514,7 +514,7 @@ func (l *Logger) getCEFExtensions() string {
 	var exts []string
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(4); caller != "" {
+		if caller := l.getCallerInfo(); caller != "" {
 			exts = append(exts, fmt.Sprintf("cs1=%s", caller))
 		}
 	}
