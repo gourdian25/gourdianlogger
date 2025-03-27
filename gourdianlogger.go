@@ -484,11 +484,41 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 
 // WithConfig creates a new logger from JSON config
 func WithConfig(jsonConfig string) (*Logger, error) {
+	// First, validate the JSON is valid
+	if !json.Valid([]byte(jsonConfig)) {
+		return nil, fmt.Errorf("invalid JSON config")
+	}
+
 	var config LoggerConfig
 	if err := json.Unmarshal([]byte(jsonConfig), &config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 	return NewGourdianLogger(config)
+}
+
+// UnmarshalJSON implements json.Unmarshaler for LoggerConfig
+func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
+	// Create a temporary type to avoid infinite recursion
+	type Alias LoggerConfig
+	aux := &struct {
+		LogLevelStr string `json:"log_level"`
+		*Alias
+	}{
+		Alias: (*Alias)(lc),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Parse the log level string into the LogLevel type
+	level, err := ParseLogLevel(aux.LogLevelStr)
+	if err != nil {
+		return err
+	}
+	lc.LogLevel = level
+
+	return nil
 }
 
 // Flush ensures all buffered logs are written (for async mode)

@@ -21,33 +21,11 @@ func main() {
 	// Example 4: Logger with JSON configuration
 	jsonConfigLoggerExample()
 
-	// Create a multi-output logger
-	config := gourdianlogger.LoggerConfig{
-		Filename:     "advanced_app",
-		MaxBytes:     10 * 1024 * 1024, // 10MB
-		BackupCount:  10,
-		LogLevel:     gourdianlogger.DEBUG,
-		EnableCaller: true,
-		BufferSize:   2000,
-		AsyncWorkers: 4,
-		ShowBanner:   true,
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	// Add an HTTP request logger as an additional output
-	httpLogger := &httpRequestLogger{logger: logger}
-	logger.AddOutput(httpLogger)
-
 	// Simulate application activity
-	simulateAppActivity(logger)
+	simulateAppActivity()
 
 	// Demonstrate dynamic configuration changes
-	dynamicConfigurationDemo(logger)
+	dynamicConfigurationDemo()
 }
 
 func simpleLoggerExample() {
@@ -176,7 +154,30 @@ func (h *httpRequestLogger) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func simulateAppActivity(logger *gourdianlogger.Logger) {
+func simulateAppActivity() {
+
+	// Create a multi-output logger
+	config := gourdianlogger.LoggerConfig{
+		Filename:     "advanced_app",
+		MaxBytes:     10 * 1024 * 1024, // 10MB
+		BackupCount:  10,
+		LogLevel:     gourdianlogger.DEBUG,
+		EnableCaller: true,
+		BufferSize:   2000,
+		AsyncWorkers: 4,
+		ShowBanner:   true,
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	// Add an HTTP request logger as an additional output
+	httpLogger := &httpRequestLogger{logger: logger}
+	logger.AddOutput(httpLogger)
+
 	// Simulate different components of an application
 	go func() {
 		for i := 0; i < 20; i++ {
@@ -204,7 +205,30 @@ func simulateAppActivity(logger *gourdianlogger.Logger) {
 	time.Sleep(3 * time.Second)
 }
 
-func dynamicConfigurationDemo(logger *gourdianlogger.Logger) {
+func dynamicConfigurationDemo() {
+
+	// Create a multi-output logger
+	config := gourdianlogger.LoggerConfig{
+		Filename:     "advanced_app",
+		MaxBytes:     10 * 1024 * 1024, // 10MB
+		BackupCount:  10,
+		LogLevel:     gourdianlogger.DEBUG,
+		EnableCaller: true,
+		BufferSize:   2000,
+		AsyncWorkers: 4,
+		ShowBanner:   true,
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	// Add an HTTP request logger as an additional output
+	httpLogger := &httpRequestLogger{logger: logger}
+	logger.AddOutput(httpLogger)
+
 	// Create a buffer to capture logs temporarily
 	var buf bytes.Buffer
 
