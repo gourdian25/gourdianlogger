@@ -12,34 +12,34 @@ import (
 )
 
 func main() {
-	// examples := []func(){
-	// 	simpleLoggerExample,
-	// 	customLoggerExample,
-	// 	asyncLoggerExample,
-	// 	jsonConfigLoggerExample,
-	// 	simulateAppActivity,
-	// 	dynamicConfigurationDemo,
-	// 	plainTextExample,
-	// 	jsonExample,
-	// 	logfmtExample,
-	// 	csvExample,
-	// 	xmlExample,
-	// 	clfExample,
-	// 	gelfExample,
-	// 	cefExample,
-	// 	jsonConfigExample,
-	// }
+	examples := []func(){
+		simpleLoggerExample,
+		customLoggerExample,
+		asyncLoggerExample,
+		jsonConfigLoggerExample,
+		simulateAppActivity,
+		dynamicConfigurationDemo,
+		plainTextExample,
+		jsonExample,
+		logfmtExample,
+		csvExample,
+		xmlExample,
+		clfExample,
+		gelfExample,
+		cefExample,
+		jsonConfigExample,
+	}
 
-	// for i, example := range examples {
-	// 	fmt.Printf("\n=== Running Example %d ===\n", i+1)
-	// 	example()
-	// 	time.Sleep(500 * time.Millisecond)
-	// }
+	for i, example := range examples {
+		fmt.Printf("\n=== Running Example %d ===\n", i+1)
+		example()
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Create the json_logs directory first to ensure it exists
 	// os.MkdirAll("json_logs", 0755)
 
-	jsonConfigExample()
+	// jsonConfigExample()
 }
 
 func simpleLoggerExample() {
