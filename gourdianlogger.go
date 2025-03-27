@@ -111,8 +111,9 @@ type Logger struct {
 }
 
 type logEntry struct {
-	level   LogLevel
-	message string
+	level      LogLevel
+	message    string
+	callerInfo string
 }
 
 // String returns the string representation of the LogLevel
@@ -296,8 +297,7 @@ func (l *Logger) asyncWorker() {
 	}
 }
 
-// processLogEntry handles the core logging logic
-func (l *Logger) processLogEntry(level LogLevel, message string) {
+func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo string) {
 	if level < l.GetLogLevel() {
 		return
 	}
@@ -306,7 +306,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	buf.Reset()
 	defer l.bufferPool.Put(buf)
 
-	buf.WriteString(l.formatMessage(level, message))
+	buf.WriteString(l.formatMessage(level, message, callerInfo))
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -325,25 +325,19 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// Update all format functions to use getCallerInfo without skip parameter
-func (l *Logger) formatPlain(level LogLevel, message string) string {
-	var (
-		levelStr     = fmt.Sprintf("%-5s", level.String())
-		callerInfo   string
-		timestampStr = time.Now().Format(l.timestampFormat)
-	)
+func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) string {
+	levelStr := fmt.Sprintf("%-5s", level.String())
+	timestampStr := time.Now().Format(l.timestampFormat)
 
-	if l.enableCaller {
-		callerInfo = l.getCallerInfo()
-		if callerInfo != "" {
-			callerInfo = callerInfo + ":"
-		}
+	var callerPart string
+	if callerInfo != "" {
+		callerPart = callerInfo + ":"
 	}
 
 	return fmt.Sprintf("%s [%s] %s%s\n",
 		timestampStr,
 		levelStr,
-		callerInfo,
+		callerPart,
 		message,
 	)
 }
@@ -526,16 +520,7 @@ func (l *Logger) getCEFExtensions() string {
 	return strings.Join(exts, " ")
 }
 
-// getCallerInfo retrieves the correct caller information with proper depth
-func (l *Logger) getCallerInfo() string {
-	// We need to skip:
-	// 1. runtime.Caller
-	// 2. This function (getCallerInfo)
-	// 3. The formatMessage function
-	// 4. The log function (Debug, Info, etc.)
-	// 5. The actual logging call from user code
-	const skip = 5
-
+func (l *Logger) getCallerInfo(skip int) string {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
 		return ""
@@ -550,23 +535,16 @@ func (l *Logger) getCallerInfo() string {
 		return fmt.Sprintf("%s:%d", fileName, line)
 	}
 
-	// Get the full function name
-	fullFnName := fn.Name()
-
-	// Simplify the function name by removing package path
-	// First remove the package path
-	lastSlash := strings.LastIndex(fullFnName, "/")
-	if lastSlash >= 0 {
-		fullFnName = fullFnName[lastSlash+1:]
+	// Get just the function name without package path
+	fnName := fn.Name()
+	if lastSlash := strings.LastIndex(fnName, "/"); lastSlash >= 0 {
+		fnName = fnName[lastSlash+1:]
+	}
+	if dot := strings.LastIndex(fnName, "."); dot >= 0 {
+		fnName = fnName[dot+1:]
 	}
 
-	// Then remove the package name
-	dot := strings.LastIndex(fullFnName, ".")
-	if dot >= 0 {
-		fullFnName = fullFnName[dot+1:]
-	}
-
-	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
+	return fmt.Sprintf("%s:%d:%s", fileName, line, fnName)
 }
 
 func (l *Logger) formatMessage(level LogLevel, message string) string {
@@ -590,17 +568,22 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 	}
 }
 
-// log is the internal logging function that routes to sync or async
 func (l *Logger) log(level LogLevel, message string) {
+	// Get caller info before processing (skip 4 frames to get to actual caller)
+	var callerInfo string
+	if l.enableCaller {
+		callerInfo = l.getCallerInfo(4) // Adjusted skip count
+	}
+
 	if l.asyncQueue != nil {
 		select {
-		case l.asyncQueue <- &logEntry{level, message}:
+		case l.asyncQueue <- &logEntry{level, message, callerInfo}:
 		default:
 			// Fallback to synchronous if buffer is full
-			l.processLogEntry(level, message)
+			l.processLogEntry(level, message, callerInfo)
 		}
 	} else {
-		l.processLogEntry(level, message)
+		l.processLogEntry(level, message, callerInfo)
 	}
 }
 
