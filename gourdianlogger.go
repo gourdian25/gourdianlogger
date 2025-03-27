@@ -16,8 +16,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lucasb-eyer/go-colorful"
-
-	"github.com/muesli/gamut"
 )
 
 // LogLevel represents the severity level of log messages
@@ -42,18 +40,13 @@ var (
 // Color palette for the logger
 var (
 	// Base colors
-	subtle    = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
-	highlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	special   = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
-	warning   = lipgloss.AdaptiveColor{Light: "#FFA500", Dark: "#FFA500"}
-	danger    = lipgloss.AdaptiveColor{Light: "#FF5F87", Dark: "#FF0000"}
-	cream     = lipgloss.Color("#FFF7DB")
-	pink      = lipgloss.Color("#F25D94")
-	purple    = lipgloss.Color("#A550DF")
-	teal      = lipgloss.Color("#14F9D5")
-
-	// Gradient blends for colorful output
-	blends = gamut.Blends(lipgloss.Color("#F25D94"), lipgloss.Color("#EDFF82"), 50)
+	subtle  = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
+	special = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
+	warning = lipgloss.AdaptiveColor{Light: "#FFA500", Dark: "#FFA500"}
+	danger  = lipgloss.AdaptiveColor{Light: "#FF5F87", Dark: "#FF0000"}
+	cream   = lipgloss.Color("#FFF7DB")
+	pink    = lipgloss.Color("#F25D94")
+	purple  = lipgloss.Color("#A550DF")
 
 	// Style definitions
 	debugStyle = lipgloss.NewStyle().
@@ -99,6 +92,22 @@ var (
 		String()
 )
 
+// Change the blends definition to use colorful.Color instead of color.Color
+var blends = func() []colorful.Color {
+	// Create a gradient between two colors
+	from, _ := colorful.Hex("#F25D94")
+	to, _ := colorful.Hex("#EDFF82")
+
+	// Generate 50 steps between these colors
+	steps := 50
+	gradient := make([]colorful.Color, steps)
+	for i := 0; i < steps; i++ {
+		t := float64(i) / float64(steps-1)
+		gradient[i] = from.BlendHcl(to, t).Clamped()
+	}
+	return gradient
+}()
+
 // LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
 	Filename        string      `json:"filename"`         // Base filename for logs
@@ -138,7 +147,6 @@ type Logger struct {
 	asyncCloseChan   chan struct{}  // Async stop signal
 	asyncWorkerCount int            // Number of async workers
 	enableColor      bool           // Enable colored output
-	theme            string         // Current theme
 }
 
 // colorWriter is a custom writer that applies color to console output
@@ -314,10 +322,10 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		}
 	}
 
-	// Show banner if enabled
-	if config.ShowBanner {
-		logger.showBanner()
-	}
+	// // Show banner if enabled
+	// if config.ShowBanner {
+	// 	logger.showBanner()
+	// }
 
 	return logger, nil
 }
@@ -391,7 +399,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// rainbow applies a rainbow effect to text
+// Update the rainbow function to use colorful.Color
 func rainbow(text string, colors []colorful.Color) string {
 	var result strings.Builder
 	for i, r := range text {
@@ -400,35 +408,6 @@ func rainbow(text string, colors []colorful.Color) string {
 		result.WriteString(style.Render(string(r)))
 	}
 	return result.String()
-}
-
-// colorGrid creates a grid of colors for gradients
-func colorGrid(xSteps, ySteps int) [][]string {
-	x0y0, _ := colorful.Hex("#F25D94")
-	x1y0, _ := colorful.Hex("#EDFF82")
-	x0y1, _ := colorful.Hex("#643AFF")
-	x1y1, _ := colorful.Hex("#14F9D5")
-
-	x0 := make([]colorful.Color, ySteps)
-	for i := range x0 {
-		x0[i] = x0y0.BlendLuv(x0y1, float64(i)/float64(ySteps))
-	}
-
-	x1 := make([]colorful.Color, ySteps)
-	for i := range x1 {
-		x1[i] = x1y0.BlendLuv(x1y1, float64(i)/float64(ySteps))
-	}
-
-	grid := make([][]string, ySteps)
-	for x := 0; x < ySteps; x++ {
-		y0 := x0[x]
-		grid[x] = make([]string, xSteps)
-		for y := 0; y < xSteps; y++ {
-			grid[x][y] = y0.BlendLuv(x1[x], float64(y)/float64(xSteps)).Hex()
-		}
-	}
-
-	return grid
 }
 
 // formatMessage formats the log message with all metadata and color
