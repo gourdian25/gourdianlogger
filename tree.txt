@@ -1,8 +1,6 @@
 .
 ├── LICENSE
 ├── Readme.md
-├── custom_logs
-│   └── myapp.log
 ├── docs.go
 ├── examples
 │   └── basic_examples.go
@@ -15,9 +13,8 @@
 ├── gourdianlogger_serialization_test.go
 ├── gourdianlogger_test.go
 ├── logs
-│   ├── app.log
-│   └── async_app.log
+│   └── app.log
 ├── tree.txt
 └── version.go
 
-4 directories, 17 files
+3 directories, 15 files

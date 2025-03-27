@@ -325,8 +325,8 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
+// formatPlain now uses getCallerInfo with proper skip
 func (l *Logger) formatPlain(level LogLevel, message string) string {
-	// Existing formatMessage implementation
 	var (
 		levelStr     = fmt.Sprintf("%-5s", level.String())
 		callerInfo   string
@@ -334,21 +334,9 @@ func (l *Logger) formatPlain(level LogLevel, message string) string {
 	)
 
 	if l.enableCaller {
-		pc, file, line, ok := runtime.Caller(3)
-		if ok {
-			funcName := "unknown"
-			if fn := runtime.FuncForPC(pc); fn != nil {
-				name := fn.Name()
-				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
-					name = name[lastSlash+1:]
-				}
-				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
-					funcName = name[lastDot+1:]
-				} else {
-					funcName = name
-				}
-			}
-			callerInfo = fmt.Sprintf("%s:%d(%s) ", filepath.Base(file), line, funcName)
+		callerInfo = l.getCallerInfo(4) // Skip 4 frames to get to the actual log call
+		if callerInfo != "" {
+			callerInfo = callerInfo + " "
 		}
 	}
 
@@ -360,6 +348,7 @@ func (l *Logger) formatPlain(level LogLevel, message string) string {
 	)
 }
 
+// formatJSON now uses getCallerInfo with proper skip
 func (l *Logger) formatJSON(level LogLevel, message string) string {
 	logEntry := struct {
 		Timestamp string `json:"timestamp"`
@@ -373,21 +362,8 @@ func (l *Logger) formatJSON(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		pc, file, line, ok := runtime.Caller(3)
-		if ok {
-			funcName := "unknown"
-			if fn := runtime.FuncForPC(pc); fn != nil {
-				name := fn.Name()
-				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
-					name = name[lastSlash+1:]
-				}
-				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
-					funcName = name[lastDot+1:]
-				} else {
-					funcName = name
-				}
-			}
-			logEntry.Caller = fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+		if caller := l.getCallerInfo(4); caller != "" {
+			logEntry.Caller = caller
 		}
 	}
 
@@ -409,8 +385,8 @@ func (l *Logger) formatCLF(level LogLevel, message string) string {
 	)
 }
 
+// Update all other format methods to use getCallerInfo with proper skip
 func (l *Logger) formatGELF(level LogLevel, message string) string {
-	// Graylog Extended Log Format (simplified version)
 	gelf := map[string]interface{}{
 		"version":       "1.1",
 		"host":          "localhost",
@@ -420,21 +396,8 @@ func (l *Logger) formatGELF(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		pc, file, line, ok := runtime.Caller(3)
-		if ok {
-			funcName := "unknown"
-			if fn := runtime.FuncForPC(pc); fn != nil {
-				name := fn.Name()
-				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
-					name = name[lastSlash+1:]
-				}
-				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
-					funcName = name[lastDot+1:]
-				} else {
-					funcName = name
-				}
-			}
-			gelf["_caller"] = fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+		if caller := l.getCallerInfo(4); caller != "" {
+			gelf["_caller"] = caller
 		}
 	}
 
@@ -459,7 +422,7 @@ func (l *Logger) formatLogfmt(level LogLevel, message string) string {
 
 	// Caller info
 	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
+		if caller := l.getCallerInfo(4); caller != "" {
 			buf.WriteString(fmt.Sprintf("caller=%q ", caller))
 		}
 	}
@@ -491,7 +454,7 @@ func (l *Logger) formatCSV(level LogLevel, message string) string {
 
 	// Caller info
 	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
+		if caller := l.getCallerInfo(4); caller != "" {
 			buf.WriteString(fmt.Sprintf("%q", caller))
 		}
 	}
@@ -516,7 +479,7 @@ func (l *Logger) formatXML(level LogLevel, message string) string {
 	}
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
+		if caller := l.getCallerInfo(4); caller != "" {
 			entry.Caller = caller
 		}
 	}
@@ -551,7 +514,7 @@ func (l *Logger) getCEFExtensions() string {
 	var exts []string
 
 	if l.enableCaller {
-		if caller := l.getCallerInfo(); caller != "" {
+		if caller := l.getCallerInfo(4); caller != "" {
 			exts = append(exts, fmt.Sprintf("cs1=%s", caller))
 		}
 	}
@@ -563,26 +526,40 @@ func (l *Logger) getCEFExtensions() string {
 	return strings.Join(exts, " ")
 }
 
-func (l *Logger) getCallerInfo() string {
-	pc, file, line, ok := runtime.Caller(3)
+// getCallerInfo retrieves the correct caller information with proper depth
+func (l *Logger) getCallerInfo(skip int) string {
+	// We need to skip:
+	// 1. This function (getCallerInfo)
+	// 2. The formatMessage function
+	// 3. The log function
+	// 4. The actual logging method (Debug, Info, etc.)
+	// So default skip is 4, but we allow customization
+	if skip <= 0 {
+		skip = 4 // Default skip for normal logging calls
+	}
+
+	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
 		return ""
 	}
 
-	funcName := "unknown"
-	if fn := runtime.FuncForPC(pc); fn != nil {
-		name := fn.Name()
-		if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
-			name = name[lastSlash+1:]
-		}
-		if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
-			funcName = name[lastDot+1:]
-		} else {
-			funcName = name
-		}
+	// Get just the file name
+	fileName := filepath.Base(file)
+
+	// Get the function name
+	funcName := runtime.FuncForPC(pc).Name()
+
+	// Simplify the function name by removing package path
+	if lastSlash := strings.LastIndex(funcName, "/"); lastSlash >= 0 {
+		funcName = funcName[lastSlash+1:]
 	}
 
-	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+	// Remove any type information if it's a method
+	if dot := strings.LastIndex(funcName, "."); dot >= 0 {
+		funcName = funcName[dot+1:]
+	}
+
+	return fmt.Sprintf("%s:%d:%s", fileName, line, funcName)
 }
 
 func (l *Logger) formatMessage(level LogLevel, message string) string {
