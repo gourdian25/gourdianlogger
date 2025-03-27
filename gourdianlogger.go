@@ -518,22 +518,17 @@ func (l *Logger) getCallerInfo(skip int) string {
 		return fmt.Sprintf("%s:%d", fileName, line)
 	}
 
-	// Get the full function name with package path
+	// Get full function name with package path
 	fullFnName := fn.Name()
 
 	// Simplify the function name:
-	// 1. First remove the package path (everything before last '/')
-	// 2. Then keep the package name and function name (everything after last '/')
-	// Example: "github.com/yourpackage.(*YourStruct).Method" -> "yourpackage.(*YourStruct).Method"
-
-	// Remove the directory path
+	// 1. Remove the package path (everything before last '/')
+	// 2. Keep the package name and function name
 	if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash >= 0 {
 		fullFnName = fullFnName[lastSlash+1:]
 	}
 
-	// For methods, we might want to keep the receiver type
-	// So we don't remove anything after the last dot
-
+	// For methods, keep the receiver type
 	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
@@ -558,14 +553,7 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 	}
 }
 
-func (l *Logger) log(level LogLevel, message string) {
-	// Calculate skip count:
-	// 1. runtime.Caller
-	// 2. This function (log)
-	// 3. The public logging method (Debug, Info, etc.)
-	// 4. The actual caller
-	const skip = 4
-
+func (l *Logger) log(level LogLevel, message string, skip int) {
 	var callerInfo string
 	if l.enableCaller {
 		callerInfo = l.getCallerInfo(skip)
@@ -575,7 +563,6 @@ func (l *Logger) log(level LogLevel, message string) {
 		select {
 		case l.asyncQueue <- &logEntry{level, message, callerInfo}:
 		default:
-			// Fallback to synchronous if buffer is full
 			l.processLogEntry(level, message, callerInfo)
 		}
 	} else {
@@ -705,43 +692,45 @@ func (l *Logger) Close() error {
 // Logging methods
 
 func (l *Logger) Debug(v ...interface{}) {
-	l.log(DEBUG, fmt.Sprint(v...))
+	l.log(DEBUG, fmt.Sprint(v...), 3) // Skip 3 frames to get to actual caller
 }
 
 func (l *Logger) Info(v ...interface{}) {
-	l.log(INFO, fmt.Sprint(v...))
+	l.log(INFO, fmt.Sprint(v...), 3) // Skip 3 frames to get to actual caller
 }
 
+// Update all other logging methods similarly...
+
 func (l *Logger) Warn(v ...interface{}) {
-	l.log(WARN, fmt.Sprint(v...))
+	l.log(WARN, fmt.Sprint(v...), 3)
 }
 
 func (l *Logger) Error(v ...interface{}) {
-	l.log(ERROR, fmt.Sprint(v...))
+	l.log(ERROR, fmt.Sprint(v...), 3)
 }
 
 func (l *Logger) Fatal(v ...interface{}) {
-	l.log(FATAL, fmt.Sprint(v...))
+	l.log(FATAL, fmt.Sprint(v...), 3)
 }
 
 func (l *Logger) Debugf(format string, v ...interface{}) {
-	l.log(DEBUG, fmt.Sprintf(format, v...))
+	l.log(DEBUG, fmt.Sprintf(format, v...), 3)
 }
 
 func (l *Logger) Infof(format string, v ...interface{}) {
-	l.log(INFO, fmt.Sprintf(format, v...))
+	l.log(INFO, fmt.Sprintf(format, v...), 3)
 }
 
 func (l *Logger) Warnf(format string, v ...interface{}) {
-	l.log(WARN, fmt.Sprintf(format, v...))
+	l.log(WARN, fmt.Sprintf(format, v...), 3)
 }
 
 func (l *Logger) Errorf(format string, v ...interface{}) {
-	l.log(ERROR, fmt.Sprintf(format, v...))
+	l.log(ERROR, fmt.Sprintf(format, v...), 3)
 }
 
 func (l *Logger) Fatalf(format string, v ...interface{}) {
-	l.log(FATAL, fmt.Sprintf(format, v...))
+	l.log(FATAL, fmt.Sprintf(format, v...), 3)
 }
 
 // WithConfig creates a new logger from JSON config
