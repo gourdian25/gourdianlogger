@@ -21,10 +21,7 @@ func main() {
 		dynamicConfigurationDemo,
 		plainTextExample,
 		jsonExample,
-		logfmtExample,
 		csvExample,
-		xmlExample,
-		clfExample,
 		gelfExample,
 		cefExample,
 		jsonConfigExample,
@@ -35,11 +32,6 @@ func main() {
 		example()
 		time.Sleep(500 * time.Millisecond)
 	}
-
-	// // // Create the json_logs directory first to ensure it exists
-	// // // os.MkdirAll("json_logs", 0755)
-
-	// simpleLoggerExample()
 }
 
 func simpleLoggerExample() {
@@ -112,18 +104,17 @@ func asyncLoggerExample() {
 func jsonConfigLoggerExample() {
 	// JSON configuration example
 	jsonConfig := `{
-        "filename": "json_config_logger",
-        "max_bytes": 3145728,
-        "backup_count": 7,
-        "log_level": "WARN",
-        "timestamp_format": "2006-01-02T15:04:05.000Z07:00",
-        "logs_dir": "logs",
-        "enable_caller": false,
-        "buffer_size": 500,
-        "async_workers": 3,
-        "show_banner": false
-		"format": "JSON",
-    }`
+		"filename": "json_config_logger",
+		"max_bytes": 3145728,
+		"backup_count": 7,
+		"log_level": "WARN",
+		"timestamp_format": "2006-01-02T15:04:05.000Z07:00",
+		"logs_dir": "logs",
+		"enable_caller": false,
+		"buffer_size": 500,
+		"async_workers": 3,
+		"format": "JSON"
+	}`
 
 	// Create logger from JSON config
 	logger, err := gourdianlogger.WithConfig(jsonConfig)
@@ -133,7 +124,7 @@ func jsonConfigLoggerExample() {
 	}
 	defer logger.Close()
 
-	// Test logging - these should appear in both console and file
+	// Test logging
 	logger.Warn("This warning will appear in file and console")
 	logger.Error("This error will appear in file and console")
 
@@ -144,7 +135,7 @@ func jsonConfigLoggerExample() {
 	// Flush to ensure all messages are written
 	logger.Flush()
 
-	fmt.Println("Check the json_logs directory for output files")
+	fmt.Println("Check the logs directory for output files")
 }
 
 type httpRequestLogger struct {
@@ -287,27 +278,6 @@ func jsonExample() {
 	logger.Error("Error with stack trace")
 }
 
-func logfmtExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "logfmt_log"
-	config.Format = gourdianlogger.FormatLogfmt
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		CustomFields: map[string]interface{}{
-			"service": "auth",
-			"version": "2.1.0",
-		},
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Info("User logged in")
-	logger.Warn("Failed login attempt")
-}
-
 func csvExample() {
 	config := gourdianlogger.DefaultConfig()
 	config.Filename = "csv_log"
@@ -328,46 +298,6 @@ func csvExample() {
 	logger.Error("Database connection failed")
 }
 
-func xmlExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "xml_log"
-	config.Format = gourdianlogger.FormatXML
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		PrettyPrint: true,
-		CustomFields: map[string]interface{}{
-			"deployment": "cluster-1",
-			"region":     "us-west",
-		},
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Info("System initialized")
-	logger.Warn("High memory usage detected")
-}
-func clfExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "clf_log"
-	config.Format = gourdianlogger.FormatCLF
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		CustomFields: map[string]interface{}{
-			"host": "api.example.com",
-		},
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Info("GET /api/users HTTP/1.1")
-	logger.Info("POST /api/auth HTTP/1.1")
-}
 func gelfExample() {
 	config := gourdianlogger.DefaultConfig()
 	config.Filename = "gelf_log"
@@ -413,25 +343,24 @@ func cefExample() {
 
 func jsonConfigExample() {
 	jsonConfig := `{
-        "filename": "config_log",
-        "max_bytes": 3145728,
-        "backup_count": 7,
-        "log_level": "INFO",
-        "timestamp_format": "2006-01-02T15:04:05.000Z07:00",
-        "logs_dir": "json_logs",
-        "enable_caller": true,
-        "buffer_size": 500,
-        "async_workers": 3,
-        "show_banner": false,
-        "format": "GELF",
-        "format_config": {
-            "custom_fields": {
-                "app": "inventory",
-                "version": "3.2.1",
-                "environment": "staging"
-            }
-        }
-    }`
+		"filename": "config_log",
+		"max_bytes": 3145728,
+		"backup_count": 7,
+		"log_level": "INFO",
+		"timestamp_format": "2006-01-02T15:04:05.000Z07:00",
+		"logs_dir": "json_logs",
+		"enable_caller": true,
+		"buffer_size": 500,
+		"async_workers": 3,
+		"format": "GELF",
+		"format_config": {
+			"custom_fields": {
+				"app": "inventory",
+				"version": "3.2.1",
+				"environment": "staging"
+			}
+		}
+	}`
 
 	logger, err := gourdianlogger.WithConfig(jsonConfig)
 	if err != nil {
