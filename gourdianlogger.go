@@ -518,16 +518,23 @@ func (l *Logger) getCallerInfo(skip int) string {
 		return fmt.Sprintf("%s:%d", fileName, line)
 	}
 
-	// Get just the function name without package path
-	fnName := fn.Name()
-	if lastSlash := strings.LastIndex(fnName, "/"); lastSlash >= 0 {
-		fnName = fnName[lastSlash+1:]
-	}
-	if dot := strings.LastIndex(fnName, "."); dot >= 0 {
-		fnName = fnName[dot+1:]
+	// Get the full function name with package path
+	fullFnName := fn.Name()
+
+	// Simplify the function name:
+	// 1. First remove the package path (everything before last '/')
+	// 2. Then keep the package name and function name (everything after last '/')
+	// Example: "github.com/yourpackage.(*YourStruct).Method" -> "yourpackage.(*YourStruct).Method"
+
+	// Remove the directory path
+	if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash >= 0 {
+		fullFnName = fullFnName[lastSlash+1:]
 	}
 
-	return fmt.Sprintf("%s:%d:%s", fileName, line, fnName)
+	// For methods, we might want to keep the receiver type
+	// So we don't remove anything after the last dot
+
+	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
 func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string) string {
