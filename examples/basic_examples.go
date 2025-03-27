@@ -12,29 +12,34 @@ import (
 )
 
 func main() {
-	examples := []func(){
-		simpleLoggerExample,
-		customLoggerExample,
-		asyncLoggerExample,
-		jsonConfigLoggerExample,
-		simulateAppActivity,
-		dynamicConfigurationDemo,
-		plainTextExample,
-		jsonExample,
-		logfmtExample,
-		csvExample,
-		xmlExample,
-		clfExample,
-		gelfExample,
-		cefExample,
-		jsonConfigExample,
-	}
+	// examples := []func(){
+	// 	simpleLoggerExample,
+	// 	customLoggerExample,
+	// 	asyncLoggerExample,
+	// 	jsonConfigLoggerExample,
+	// 	simulateAppActivity,
+	// 	dynamicConfigurationDemo,
+	// 	plainTextExample,
+	// 	jsonExample,
+	// 	logfmtExample,
+	// 	csvExample,
+	// 	xmlExample,
+	// 	clfExample,
+	// 	gelfExample,
+	// 	cefExample,
+	// 	jsonConfigExample,
+	// }
 
-	for i, example := range examples {
-		fmt.Printf("\n=== Running Example %d ===\n", i+1)
-		example()
-		time.Sleep(500 * time.Millisecond)
-	}
+	// for i, example := range examples {
+	// 	fmt.Printf("\n=== Running Example %d ===\n", i+1)
+	// 	example()
+	// 	time.Sleep(500 * time.Millisecond)
+	// }
+
+	// Create the json_logs directory first to ensure it exists
+	// os.MkdirAll("json_logs", 0755)
+
+	jsonConfigExample()
 }
 
 func simpleLoggerExample() {
@@ -405,15 +410,16 @@ func cefExample() {
 	logger.Warn("Failed login attempt")
 	logger.Error("Brute force attack detected")
 }
+
 func jsonConfigExample() {
 	jsonConfig := `{
         "filename": "config_log",
         "max_bytes": 3145728,
         "backup_count": 7,
-        "log_level": "WARN",
+        "log_level": "INFO",
         "timestamp_format": "2006-01-02T15:04:05.000Z07:00",
         "logs_dir": "json_logs",
-        "enable_caller": false,
+        "enable_caller": true,
         "buffer_size": 500,
         "async_workers": 3,
         "show_banner": false,
@@ -435,9 +441,13 @@ func jsonConfigExample() {
 	defer logger.Close()
 
 	logger.Info("Inventory service started")
-	logger.Warn("Low stock warning")
-	logger.Error("Database connection failed")
+	logger.Warn("Low stock warning detected")
+	logger.Error("Failed to connect to database")
+
+	// Add some context
+	logger.Infof("Current stock levels: %d items", 42)
+	logger.Warnf("Only %d units remaining for product %s", 3, "ABC123")
 
 	logger.Flush()
-	fmt.Println("Check the json_logs directory for output files")
+	fmt.Println("Logging completed. Check json_logs/config_log.log")
 }

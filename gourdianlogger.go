@@ -151,6 +151,14 @@ func DefaultConfig() LoggerConfig {
 		BufferSize:      0, // Sync by default
 		AsyncWorkers:    1, // Default workers if async enabled
 		Format:          FormatPlain,
+		// In DefaultConfig():
+		FormatConfig: FormatConfig{
+			TimestampField: "timestamp",
+			LevelField:     "level",
+			MessageField:   "message",
+			CallerField:    "caller",
+			CSVDelimiter:   ',',
+		},
 	}
 }
 
@@ -181,6 +189,13 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
+
+	// In NewGourdianLogger, after directory creation:
+	absLogsDir, err := filepath.Abs(config.LogsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for logs directory: %w", err)
+	}
+	fmt.Printf("Logs will be written to: %s\n", absLogsDir) // Debug output
 
 	logPath := filepath.Join(config.LogsDir, config.Filename+".log")
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
