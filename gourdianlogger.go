@@ -26,6 +26,16 @@ const (
 	FATAL
 )
 
+// LogFormat represents the format of log messages
+type LogFormat int
+
+const (
+	FormatPlain LogFormat = iota // Default plain text format
+	FormatJSON                   // JSON format
+	FormatCLF                    // Common Log Format (for HTTP)
+	FormatGELF                   // Graylog Extended Log Format
+)
+
 var (
 	// Default values
 	defaultMaxBytes        int64  = 10 * 1024 * 1024 // 10MB
@@ -46,7 +56,7 @@ type LoggerConfig struct {
 	EnableCaller    bool        `json:"enable_caller"`    // Include caller info
 	BufferSize      int         `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int         `json:"async_workers"`    // Number of async workers
-	ShowBanner      bool        `json:"show_banner"`      // Show banner on initialization
+	Format          LogFormat   `json:"format"`           // Log message format
 }
 
 // Logger is the main logging struct
@@ -70,6 +80,7 @@ type Logger struct {
 	asyncQueue       chan *logEntry // Async logging queue
 	asyncCloseChan   chan struct{}  // Async stop signal
 	asyncWorkerCount int            // Number of async workers
+	format           LogFormat      // Log message format
 }
 
 type logEntry struct {
@@ -110,9 +121,9 @@ func DefaultConfig() LoggerConfig {
 		TimestampFormat: defaultTimestampFormat,
 		LogsDir:         defaultLogsDir,
 		EnableCaller:    true,
-		BufferSize:      0,    // Sync by default
-		AsyncWorkers:    1,    // Default workers if async enabled
-		ShowBanner:      true, // Show banner by default
+		BufferSize:      0, // Sync by default
+		AsyncWorkers:    1, // Default workers if async enabled
+		Format:          FormatPlain,
 	}
 }
 
@@ -176,6 +187,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		rotateCloseChan:  make(chan struct{}),
 		enableCaller:     config.EnableCaller,
 		asyncWorkerCount: config.AsyncWorkers,
+		format:           config.Format,
 	}
 
 	logger.level.Store(int32(config.LogLevel))
@@ -271,17 +283,16 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// formatMessage formats the log message with all metadata
-func (l *Logger) formatMessage(level LogLevel, message string) string {
+func (l *Logger) formatPlain(level LogLevel, message string) string {
+	// Existing formatMessage implementation
 	var (
 		levelStr     = fmt.Sprintf("%-5s", level.String())
 		callerInfo   string
 		timestampStr = time.Now().Format(l.timestampFormat)
 	)
 
-	// Get caller info if enabled
 	if l.enableCaller {
-		pc, file, line, ok := runtime.Caller(3) // Adjusted depth for wrapper methods
+		pc, file, line, ok := runtime.Caller(3)
 		if ok {
 			funcName := "unknown"
 			if fn := runtime.FuncForPC(pc); fn != nil {
@@ -305,6 +316,104 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 		callerInfo,
 		message,
 	)
+}
+
+func (l *Logger) formatJSON(level LogLevel, message string) string {
+	logEntry := struct {
+		Timestamp string `json:"timestamp"`
+		Level     string `json:"level"`
+		Caller    string `json:"caller,omitempty"`
+		Message   string `json:"message"`
+	}{
+		Timestamp: time.Now().Format(l.timestampFormat),
+		Level:     level.String(),
+		Message:   message,
+	}
+
+	if l.enableCaller {
+		pc, file, line, ok := runtime.Caller(3)
+		if ok {
+			funcName := "unknown"
+			if fn := runtime.FuncForPC(pc); fn != nil {
+				name := fn.Name()
+				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
+					name = name[lastSlash+1:]
+				}
+				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
+					funcName = name[lastDot+1:]
+				} else {
+					funcName = name
+				}
+			}
+			logEntry.Caller = fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+		}
+	}
+
+	jsonData, err := json.Marshal(logEntry)
+	if err != nil {
+		return fmt.Sprintf(`{"error":"failed to marshal log entry: %v"}`, err)
+	}
+	return string(jsonData) + "\n"
+}
+
+func (l *Logger) formatCLF(level LogLevel, message string) string {
+	// Common Log Format: host ident authuser date request status bytes
+	// Simplified version for general logging
+	return fmt.Sprintf("%s - - [%s] %q %s\n",
+		"localhost", // Could be made configurable
+		time.Now().Format("02/Jan/2006:15:04:05 -0700"),
+		message,
+		level.String(),
+	)
+}
+
+func (l *Logger) formatGELF(level LogLevel, message string) string {
+	// Graylog Extended Log Format (simplified version)
+	gelf := map[string]interface{}{
+		"version":       "1.1",
+		"host":          "localhost",
+		"short_message": message,
+		"timestamp":     float64(time.Now().UnixNano()) / 1e9,
+		"level":         int32(level),
+	}
+
+	if l.enableCaller {
+		pc, file, line, ok := runtime.Caller(3)
+		if ok {
+			funcName := "unknown"
+			if fn := runtime.FuncForPC(pc); fn != nil {
+				name := fn.Name()
+				if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
+					name = name[lastSlash+1:]
+				}
+				if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
+					funcName = name[lastDot+1:]
+				} else {
+					funcName = name
+				}
+			}
+			gelf["_caller"] = fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+		}
+	}
+
+	jsonData, err := json.Marshal(gelf)
+	if err != nil {
+		return fmt.Sprintf(`{"error":"failed to marshal GELF entry: %v"}`, err)
+	}
+	return string(jsonData) + "\n"
+}
+
+func (l *Logger) formatMessage(level LogLevel, message string) string {
+	switch l.format {
+	case FormatJSON:
+		return l.formatJSON(level, message)
+	case FormatCLF:
+		return l.formatCLF(level, message)
+	case FormatGELF:
+		return l.formatGELF(level, message)
+	default:
+		return l.formatPlain(level, message)
+	}
 }
 
 // log is the internal logging function that routes to sync or async
@@ -502,12 +611,11 @@ func WithConfig(jsonConfig string) (*Logger, error) {
 	return NewGourdianLogger(config)
 }
 
-// UnmarshalJSON implements json.Unmarshaler for LoggerConfig
 func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
-	// Create a temporary type to avoid infinite recursion
 	type Alias LoggerConfig
 	aux := &struct {
 		LogLevelStr string `json:"log_level"`
+		FormatStr   string `json:"format"`
 		*Alias
 	}{
 		Alias: (*Alias)(lc),
@@ -517,12 +625,28 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Parse the log level string into the LogLevel type
+	// Parse log level
 	level, err := ParseLogLevel(aux.LogLevelStr)
 	if err != nil {
 		return err
 	}
 	lc.LogLevel = level
+
+	// Parse format
+	if aux.FormatStr != "" {
+		switch strings.ToUpper(aux.FormatStr) {
+		case "PLAIN":
+			lc.Format = FormatPlain
+		case "JSON":
+			lc.Format = FormatJSON
+		case "CLF":
+			lc.Format = FormatCLF
+		case "GELF":
+			lc.Format = FormatGELF
+		default:
+			return fmt.Errorf("invalid log format: %s", aux.FormatStr)
+		}
+	}
 
 	return nil
 }

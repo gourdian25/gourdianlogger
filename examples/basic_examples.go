@@ -12,21 +12,22 @@ import (
 )
 
 func main() {
-	// Run examples sequentially
-	examples := []func(){
-		simpleLoggerExample,
-		customLoggerExample,
-		asyncLoggerExample,
-		jsonConfigLoggerExample,
-		simulateAppActivity,
-		dynamicConfigurationDemo,
-	}
+	// // Run examples sequentially
+	// examples := []func(){
+	// 	simpleLoggerExample,
+	// 	customLoggerExample,
+	// 	asyncLoggerExample,
+	// 	jsonConfigLoggerExample,
+	// 	simulateAppActivity,
+	// 	dynamicConfigurationDemo,
+	// }
 
-	for i, example := range examples {
-		fmt.Printf("\n=== Running Example %d ===\n", i+1)
-		example()
-		time.Sleep(500 * time.Millisecond) // Pause between examples
-	}
+	// for i, example := range examples {
+	// 	fmt.Printf("\n=== Running Example %d ===\n", i+1)
+	// 	example()
+	// 	time.Sleep(500 * time.Millisecond) // Pause between examples
+	// }
+	simulateAppActivity()
 }
 
 func simpleLoggerExample() {
@@ -78,7 +79,7 @@ func asyncLoggerExample() {
 		LogLevel:     gourdianlogger.DEBUG,
 		BufferSize:   1000,
 		AsyncWorkers: 2,
-		ShowBanner:   true,
+		Format:       gourdianlogger.FormatJSON,
 	}
 
 	logger, err := gourdianlogger.NewGourdianLogger(config)
@@ -109,6 +110,7 @@ func jsonConfigLoggerExample() {
         "buffer_size": 500,
         "async_workers": 3,
         "show_banner": false
+		"format": "JSON",
     }`
 
 	// Create logger from JSON config
@@ -154,7 +156,7 @@ func simulateAppActivity() {
 		EnableCaller: true,
 		BufferSize:   2000,
 		AsyncWorkers: 4,
-		ShowBanner:   true,
+		Format:       gourdianlogger.FormatPlain,
 	}
 
 	logger, err := gourdianlogger.NewGourdianLogger(config)
