@@ -3,6 +3,7 @@ package gourdianlogger
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -30,10 +31,14 @@ const (
 type LogFormat int
 
 const (
-	FormatPlain LogFormat = iota // Default plain text format
-	FormatJSON                   // JSON format
-	FormatCLF                    // Common Log Format (for HTTP)
-	FormatGELF                   // Graylog Extended Log Format
+	FormatPlain  LogFormat = iota // Default plain text format
+	FormatJSON                    // JSON format
+	FormatCLF                     // Common Log Format (for HTTP)
+	FormatGELF                    // Graylog Extended Log Format
+	FormatLogfmt                  // Logfmt key=value format
+	FormatCSV                     // Comma-separated values
+	FormatXML                     // XML format
+	FormatCEF                     // Common Event Format (for security)
 )
 
 var (
@@ -46,41 +51,63 @@ var (
 
 // LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
-	Filename        string      `json:"filename"`         // Base filename for logs
-	MaxBytes        int64       `json:"max_bytes"`        // Max file size before rotation
-	BackupCount     int         `json:"backup_count"`     // Number of backups to keep
-	LogLevel        LogLevel    `json:"log_level"`        // Minimum log level
-	TimestampFormat string      `json:"timestamp_format"` // Custom timestamp format
-	Outputs         []io.Writer `json:"-"`                // Additional outputs (not JSON serializable)
-	LogsDir         string      `json:"logs_dir"`         // Directory for log files
-	EnableCaller    bool        `json:"enable_caller"`    // Include caller info
-	BufferSize      int         `json:"buffer_size"`      // Buffer size for async logging
-	AsyncWorkers    int         `json:"async_workers"`    // Number of async workers
-	Format          LogFormat   `json:"format"`           // Log message format
+	Filename        string       `json:"filename"`         // Base filename for logs
+	MaxBytes        int64        `json:"max_bytes"`        // Max file size before rotation
+	BackupCount     int          `json:"backup_count"`     // Number of backups to keep
+	LogLevel        LogLevel     `json:"log_level"`        // Minimum log level
+	TimestampFormat string       `json:"timestamp_format"` // Custom timestamp format
+	Outputs         []io.Writer  `json:"-"`                // Additional outputs (not JSON serializable)
+	LogsDir         string       `json:"logs_dir"`         // Directory for log files
+	EnableCaller    bool         `json:"enable_caller"`    // Include caller info
+	BufferSize      int          `json:"buffer_size"`      // Buffer size for async logging
+	AsyncWorkers    int          `json:"async_workers"`    // Number of async workers
+	Format          LogFormat    `json:"format"`           // Log message format
+	FormatConfig    FormatConfig `json:"format_config"`    // Format-specific config
+}
+
+// FormatConfig holds format-specific configuration
+type FormatConfig struct {
+	// JSON/XML specific
+	PrettyPrint bool `json:"pretty_print"` // For human-readable JSON/XML
+
+	// CSV specific
+	CSVHeaders   bool `json:"csv_headers"`   // Include headers in CSV
+	CSVDelimiter rune `json:"csv_delimiter"` // Custom delimiter
+
+	// Field customization
+	TimestampField string `json:"timestamp_field"` // Custom field name
+	LevelField     string `json:"level_field"`
+	MessageField   string `json:"message_field"`
+	CallerField    string `json:"caller_field"`
+
+	// Custom fields to include in all formats
+	CustomFields map[string]interface{} `json:"custom_fields"`
 }
 
 // Logger is the main logging struct
 type Logger struct {
-	mu               sync.RWMutex   // Protects non-atomic operations
-	level            atomic.Int32   // Atomic log level
-	baseFilename     string         // Base log file path
-	maxBytes         int64          // Max file size
-	backupCount      int            // Number of backups
-	file             *os.File       // Current log file
-	multiWriter      io.Writer      // Combined output
-	bufferPool       sync.Pool      // Reusable buffers
-	timestampFormat  string         // Time format
-	outputs          []io.Writer    // All outputs
-	logsDir          string         // Log directory
-	closed           atomic.Bool    // Atomic closed flag
-	rotateChan       chan struct{}  // Rotation signal
-	rotateCloseChan  chan struct{}  // Rotation stop signal
-	wg               sync.WaitGroup // Background ops
-	enableCaller     bool           // Include caller info
-	asyncQueue       chan *logEntry // Async logging queue
-	asyncCloseChan   chan struct{}  // Async stop signal
-	asyncWorkerCount int            // Number of async workers
-	format           LogFormat      // Log message format
+	mu                sync.RWMutex   // Protects non-atomic operations
+	level             atomic.Int32   // Atomic log level
+	baseFilename      string         // Base log file path
+	maxBytes          int64          // Max file size
+	backupCount       int            // Number of backups
+	file              *os.File       // Current log file
+	multiWriter       io.Writer      // Combined output
+	bufferPool        sync.Pool      // Reusable buffers
+	timestampFormat   string         // Time format
+	outputs           []io.Writer    // All outputs
+	logsDir           string         // Log directory
+	closed            atomic.Bool    // Atomic closed flag
+	rotateChan        chan struct{}  // Rotation signal
+	rotateCloseChan   chan struct{}  // Rotation stop signal
+	wg                sync.WaitGroup // Background ops
+	enableCaller      bool           // Include caller info
+	asyncQueue        chan *logEntry // Async logging queue
+	asyncCloseChan    chan struct{}  // Async stop signal
+	asyncWorkerCount  int            // Number of async workers
+	format            LogFormat      // Log message format
+	formatConfig      FormatConfig
+	csvHeadersWritten bool // For CSV header tracking
 }
 
 type logEntry struct {
@@ -403,6 +430,146 @@ func (l *Logger) formatGELF(level LogLevel, message string) string {
 	return string(jsonData) + "\n"
 }
 
+func (l *Logger) formatLogfmt(level LogLevel, message string) string {
+	var buf strings.Builder
+
+	// Timestamp
+	buf.WriteString(fmt.Sprintf("ts=%q ", time.Now().Format(l.timestampFormat)))
+
+	// Level
+	buf.WriteString(fmt.Sprintf("level=%s ", strings.ToLower(level.String())))
+
+	// Message
+	buf.WriteString(fmt.Sprintf("msg=%q ", message))
+
+	// Caller info
+	if l.enableCaller {
+		if caller := l.getCallerInfo(); caller != "" {
+			buf.WriteString(fmt.Sprintf("caller=%q ", caller))
+		}
+	}
+
+	// Custom fields
+	for k, v := range l.formatConfig.CustomFields {
+		buf.WriteString(fmt.Sprintf("%s=%v ", k, v))
+	}
+
+	return strings.TrimSpace(buf.String()) + "\n"
+}
+
+func (l *Logger) formatCSV(level LogLevel, message string) string {
+	var buf strings.Builder
+
+	if l.formatConfig.CSVHeaders && !l.csvHeadersWritten {
+		buf.WriteString("timestamp,level,message,caller\n")
+		l.csvHeadersWritten = true
+	}
+
+	// Timestamp
+	buf.WriteString(fmt.Sprintf("%q%c", time.Now().Format(l.timestampFormat), l.formatConfig.CSVDelimiter))
+
+	// Level
+	buf.WriteString(fmt.Sprintf("%q%c", level.String(), l.formatConfig.CSVDelimiter))
+
+	// Message
+	buf.WriteString(fmt.Sprintf("%q%c", message, l.formatConfig.CSVDelimiter))
+
+	// Caller info
+	if l.enableCaller {
+		if caller := l.getCallerInfo(); caller != "" {
+			buf.WriteString(fmt.Sprintf("%q", caller))
+		}
+	}
+
+	return buf.String() + "\n"
+}
+
+func (l *Logger) formatXML(level LogLevel, message string) string {
+	type LogEntry struct {
+		Timestamp string                 `xml:"timestamp"`
+		Level     string                 `xml:"level"`
+		Message   string                 `xml:"message"`
+		Caller    string                 `xml:"caller,omitempty"`
+		Custom    map[string]interface{} `xml:"custom>field"`
+	}
+
+	entry := LogEntry{
+		Timestamp: time.Now().Format(l.timestampFormat),
+		Level:     level.String(),
+		Message:   message,
+		Custom:    l.formatConfig.CustomFields,
+	}
+
+	if l.enableCaller {
+		if caller := l.getCallerInfo(); caller != "" {
+			entry.Caller = caller
+		}
+	}
+
+	var xmlData []byte
+	var err error
+
+	if l.formatConfig.PrettyPrint {
+		xmlData, err = xml.MarshalIndent(entry, "", "  ")
+	} else {
+		xmlData, err = xml.Marshal(entry)
+	}
+
+	if err != nil {
+		return fmt.Sprintf("<error>failed to marshal XML entry: %v</error>\n", err)
+	}
+
+	return string(xmlData) + "\n"
+}
+
+func (l *Logger) formatCEF(level LogLevel, message string) string {
+	// Common Event Format for security logging
+	return fmt.Sprintf("CEF:0|GourdianLogger|Logger|1.0|%d|%s|%d|%s\n",
+		level,
+		message,
+		time.Now().Unix(),
+		l.getCEFExtensions(),
+	)
+}
+
+func (l *Logger) getCEFExtensions() string {
+	var exts []string
+
+	if l.enableCaller {
+		if caller := l.getCallerInfo(); caller != "" {
+			exts = append(exts, fmt.Sprintf("cs1=%s", caller))
+		}
+	}
+
+	for k, v := range l.formatConfig.CustomFields {
+		exts = append(exts, fmt.Sprintf("%s=%v", k, v))
+	}
+
+	return strings.Join(exts, " ")
+}
+
+func (l *Logger) getCallerInfo() string {
+	pc, file, line, ok := runtime.Caller(3)
+	if !ok {
+		return ""
+	}
+
+	funcName := "unknown"
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		name := fn.Name()
+		if lastSlash := strings.LastIndex(name, "/"); lastSlash >= 0 {
+			name = name[lastSlash+1:]
+		}
+		if lastDot := strings.LastIndex(name, "."); lastDot >= 0 {
+			funcName = name[lastDot+1:]
+		} else {
+			funcName = name
+		}
+	}
+
+	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, funcName)
+}
+
 func (l *Logger) formatMessage(level LogLevel, message string) string {
 	switch l.format {
 	case FormatJSON:
@@ -411,6 +578,14 @@ func (l *Logger) formatMessage(level LogLevel, message string) string {
 		return l.formatCLF(level, message)
 	case FormatGELF:
 		return l.formatGELF(level, message)
+	case FormatLogfmt:
+		return l.formatLogfmt(level, message)
+	case FormatCSV:
+		return l.formatCSV(level, message)
+	case FormatXML:
+		return l.formatXML(level, message)
+	case FormatCEF:
+		return l.formatCEF(level, message)
 	default:
 		return l.formatPlain(level, message)
 	}

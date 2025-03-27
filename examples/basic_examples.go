@@ -12,22 +12,29 @@ import (
 )
 
 func main() {
-	// // Run examples sequentially
-	// examples := []func(){
-	// 	simpleLoggerExample,
-	// 	customLoggerExample,
-	// 	asyncLoggerExample,
-	// 	jsonConfigLoggerExample,
-	// 	simulateAppActivity,
-	// 	dynamicConfigurationDemo,
-	// }
+	examples := []func(){
+		simpleLoggerExample,
+		customLoggerExample,
+		asyncLoggerExample,
+		jsonConfigLoggerExample,
+		simulateAppActivity,
+		dynamicConfigurationDemo,
+		plainTextExample,
+		jsonExample,
+		logfmtExample,
+		csvExample,
+		xmlExample,
+		clfExample,
+		gelfExample,
+		cefExample,
+		jsonConfigExample,
+	}
 
-	// for i, example := range examples {
-	// 	fmt.Printf("\n=== Running Example %d ===\n", i+1)
-	// 	example()
-	// 	time.Sleep(500 * time.Millisecond) // Pause between examples
-	// }
-	simulateAppActivity()
+	for i, example := range examples {
+		fmt.Printf("\n=== Running Example %d ===\n", i+1)
+		example()
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func simpleLoggerExample() {
@@ -236,4 +243,189 @@ func dynamicConfigurationDemo() {
 
 	logger.SetLogLevel(gourdianlogger.DEBUG)
 	logger.Debug("Debug is back!")
+}
+
+func plainTextExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "plain_log"
+	config.Format = gourdianlogger.FormatPlain
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("This is a plain text log entry")
+	logger.Warn("Warning with caller info")
+}
+
+func jsonExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "json_log"
+	config.Format = gourdianlogger.FormatJSON
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		PrettyPrint: true,
+		CustomFields: map[string]interface{}{
+			"app": "myapp",
+			"env": "production",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("This is a JSON log entry")
+	logger.Error("Error with stack trace")
+}
+
+func logfmtExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "logfmt_log"
+	config.Format = gourdianlogger.FormatLogfmt
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		CustomFields: map[string]interface{}{
+			"service": "auth",
+			"version": "2.1.0",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("User logged in")
+	logger.Warn("Failed login attempt")
+}
+
+func csvExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "csv_log"
+	config.Format = gourdianlogger.FormatCSV
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		CSVHeaders:   true,
+		CSVDelimiter: '|', // Pipe delimiter instead of comma
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("Starting service")
+	logger.Info("Processing request")
+	logger.Error("Database connection failed")
+}
+
+func xmlExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "xml_log"
+	config.Format = gourdianlogger.FormatXML
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		PrettyPrint: true,
+		CustomFields: map[string]interface{}{
+			"deployment": "cluster-1",
+			"region":     "us-west",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("System initialized")
+	logger.Warn("High memory usage detected")
+}
+func clfExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "clf_log"
+	config.Format = gourdianlogger.FormatCLF
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		CustomFields: map[string]interface{}{
+			"host": "api.example.com",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("GET /api/users HTTP/1.1")
+	logger.Info("POST /api/auth HTTP/1.1")
+}
+func gelfExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "gelf_log"
+	config.Format = gourdianlogger.FormatGELF
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		CustomFields: map[string]interface{}{
+			"_service": "payment",
+			"_pod":     "payment-7865d4f96-abc12",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("Payment processed")
+	logger.Error("Payment failed with invalid card")
+}
+
+func cefExample() {
+	config := gourdianlogger.DefaultConfig()
+	config.Filename = "cef_log"
+	config.Format = gourdianlogger.FormatCEF
+	config.FormatConfig = gourdianlogger.FormatConfig{
+		CustomFields: map[string]interface{}{
+			"src": "192.168.1.100",
+			"dst": "10.0.0.5",
+			"act": "login",
+		},
+	}
+
+	logger, err := gourdianlogger.NewGourdianLogger(config)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Warn("Failed login attempt")
+	logger.Error("Brute force attack detected")
+}
+
+func jsonConfigExample() {
+	jsonConfig := `{
+        "filename": "config_log",
+        "format": "GELF",
+        "log_level": "INFO",
+        "format_config": {
+            "custom_fields": {
+                "app": "inventory",
+                "version": "3.2.1",
+                "environment": "staging"
+            }
+        }
+    }`
+
+	logger, err := gourdianlogger.WithConfig(jsonConfig)
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Close()
+
+	logger.Info("Inventory updated")
+	logger.Warn("Low stock alert")
 }
