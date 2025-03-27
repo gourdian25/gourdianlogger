@@ -325,7 +325,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string) {
 	}
 }
 
-// formatPlain now uses getCallerInfo with proper skip
+// Update all format functions to use getCallerInfo without skip parameter
 func (l *Logger) formatPlain(level LogLevel, message string) string {
 	var (
 		levelStr     = fmt.Sprintf("%-5s", level.String())
@@ -334,9 +334,9 @@ func (l *Logger) formatPlain(level LogLevel, message string) string {
 	)
 
 	if l.enableCaller {
-		callerInfo = l.getCallerInfo(4) // Skip 4 frames to get to the actual log call
+		callerInfo = l.getCallerInfo()
 		if callerInfo != "" {
-			callerInfo = callerInfo + " "
+			callerInfo = callerInfo + ":"
 		}
 	}
 
@@ -527,16 +527,14 @@ func (l *Logger) getCEFExtensions() string {
 }
 
 // getCallerInfo retrieves the correct caller information with proper depth
-func (l *Logger) getCallerInfo(skip int) string {
+func (l *Logger) getCallerInfo() string {
 	// We need to skip:
-	// 1. This function (getCallerInfo)
-	// 2. The formatMessage function
-	// 3. The log function
-	// 4. The actual logging method (Debug, Info, etc.)
-	// So default skip is 4, but we allow customization
-	if skip <= 0 {
-		skip = 4 // Default skip for normal logging calls
-	}
+	// 1. runtime.Caller
+	// 2. This function (getCallerInfo)
+	// 3. The formatMessage function
+	// 4. The log function (Debug, Info, etc.)
+	// 5. The actual logging call from user code
+	const skip = 5
 
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
@@ -547,19 +545,28 @@ func (l *Logger) getCallerInfo(skip int) string {
 	fileName := filepath.Base(file)
 
 	// Get the function name
-	funcName := runtime.FuncForPC(pc).Name()
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return fmt.Sprintf("%s:%d", fileName, line)
+	}
+
+	// Get the full function name
+	fullFnName := fn.Name()
 
 	// Simplify the function name by removing package path
-	if lastSlash := strings.LastIndex(funcName, "/"); lastSlash >= 0 {
-		funcName = funcName[lastSlash+1:]
+	// First remove the package path
+	lastSlash := strings.LastIndex(fullFnName, "/")
+	if lastSlash >= 0 {
+		fullFnName = fullFnName[lastSlash+1:]
 	}
 
-	// Remove any type information if it's a method
-	if dot := strings.LastIndex(funcName, "."); dot >= 0 {
-		funcName = funcName[dot+1:]
+	// Then remove the package name
+	dot := strings.LastIndex(fullFnName, ".")
+	if dot >= 0 {
+		fullFnName = fullFnName[dot+1:]
 	}
 
-	return fmt.Sprintf("%s:%d:%s", fileName, line, funcName)
+	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
 func (l *Logger) formatMessage(level LogLevel, message string) string {
