@@ -46,12 +46,12 @@ func simpleLoggerExample() {
 
 func customLoggerExample() {
 	config := gourdianlogger.LoggerConfig{
-		Filename:        "myapp",
+		Filename:        "custom_logger",
 		MaxBytes:        5 * 1024 * 1024,
 		BackupCount:     3,
 		LogLevel:        gourdianlogger.INFO,
 		TimestampFormat: "2006-01-02 15:04:05",
-		LogsDir:         "custom_logs",
+		LogsDir:         "logs",
 		EnableCaller:    true,
 	}
 
@@ -72,7 +72,7 @@ func customLoggerExample() {
 
 func asyncLoggerExample() {
 	config := gourdianlogger.LoggerConfig{
-		Filename:     "async_app",
+		Filename:     "async_logger",
 		MaxBytes:     2 * 1024 * 1024,
 		BackupCount:  5,
 		LogLevel:     gourdianlogger.DEBUG,
@@ -97,30 +97,40 @@ func asyncLoggerExample() {
 }
 
 func jsonConfigLoggerExample() {
+	// JSON configuration example
 	jsonConfig := `{
-		"filename": "json_config_app",
-		"max_bytes": 3145728,
-		"backup_count": 7,
-		"log_level": "WARN",
-		"timestamp_format": "2006-01-02T15:04:05.000Z07:00",
-		"logs_dir": "json_logs",
-		"enable_caller": false,
-		"buffer_size": 500,
-		"async_workers": 3,
-		"show_banner": false
-	}`
+        "filename": "json_config_logger",
+        "max_bytes": 3145728,
+        "backup_count": 7,
+        "log_level": "WARN",
+        "timestamp_format": "2006-01-02T15:04:05.000Z07:00",
+        "logs_dir": "logs",
+        "enable_caller": false,
+        "buffer_size": 500,
+        "async_workers": 3,
+        "show_banner": false
+    }`
 
+	// Create logger from JSON config
 	logger, err := gourdianlogger.WithConfig(jsonConfig)
 	if err != nil {
-		fmt.Printf("Error creating logger from JSON: %v\n", err)
+		fmt.Printf("Failed to create logger from JSON: %v\n", err)
 		return
 	}
 	defer logger.Close()
 
-	logger.Debug("This won't appear")
-	logger.Warn("This will appear")
+	// Test logging - these should appear in both console and file
+	logger.Warn("This warning will appear in file and console")
+	logger.Error("This error will appear in file and console")
+
+	// Change log level dynamically
 	logger.SetLogLevel(gourdianlogger.DEBUG)
-	logger.Debug("Now this will appear")
+	logger.Debug("Now debug messages will appear after level change")
+
+	// Flush to ensure all messages are written
+	logger.Flush()
+
+	fmt.Println("Check the json_logs directory for output files")
 }
 
 type httpRequestLogger struct {
@@ -137,7 +147,7 @@ func (h *httpRequestLogger) Write(p []byte) (n int, err error) {
 
 func simulateAppActivity() {
 	config := gourdianlogger.LoggerConfig{
-		Filename:     "advanced_app",
+		Filename:     "simulate_app_activity",
 		MaxBytes:     10 * 1024 * 1024,
 		BackupCount:  10,
 		LogLevel:     gourdianlogger.DEBUG,
@@ -190,7 +200,7 @@ func simulateAppActivity() {
 
 func dynamicConfigurationDemo() {
 	config := gourdianlogger.LoggerConfig{
-		Filename:     "dynamic_app",
+		Filename:     "dynamic_configuration",
 		MaxBytes:     5 * 1024 * 1024,
 		BackupCount:  5,
 		LogLevel:     gourdianlogger.INFO,

@@ -493,6 +493,12 @@ func WithConfig(jsonConfig string) (*Logger, error) {
 	if err := json.Unmarshal([]byte(jsonConfig), &config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+
+	// Ensure logs directory exists
+	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+
 	return NewGourdianLogger(config)
 }
 
