@@ -2,8 +2,8 @@ package gourdianlogger
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -31,18 +31,14 @@ const (
 type LogFormat int
 
 const (
-	FormatPlain  LogFormat = iota // Default plain text format
-	FormatJSON                    // JSON format
-	FormatCLF                     // Common Log Format (for HTTP)
-	FormatGELF                    // Graylog Extended Log Format
-	FormatLogfmt                  // Logfmt key=value format
-	FormatCSV                     // Comma-separated values
-	FormatXML                     // XML format
-	FormatCEF                     // Common Event Format (for security)
+	FormatPlain LogFormat = iota // Default plain text format
+	FormatJSON                   // JSON format
+	FormatGELF                   // Graylog Extended Log Format
+	FormatCSV                    // Comma-separated values
+	FormatCEF                    // Common Event Format (for security)
 )
 
 var (
-	// Default values
 	defaultMaxBytes        int64  = 10 * 1024 * 1024 // 10MB
 	defaultBackupCount     int    = 5
 	defaultTimestampFormat string = "2006-01-02 15:04:05.000000"
@@ -56,7 +52,7 @@ type LoggerConfig struct {
 	BackupCount     int          `json:"backup_count"`     // Number of backups to keep
 	LogLevel        LogLevel     `json:"log_level"`        // Minimum log level
 	TimestampFormat string       `json:"timestamp_format"` // Custom timestamp format
-	Outputs         []io.Writer  `json:"-"`                // Additional outputs (not JSON serializable)
+	Outputs         []io.Writer  `json:"-"`                // Additional outputs
 	LogsDir         string       `json:"logs_dir"`         // Directory for log files
 	EnableCaller    bool         `json:"enable_caller"`    // Include caller info
 	BufferSize      int          `json:"buffer_size"`      // Buffer size for async logging
@@ -65,49 +61,38 @@ type LoggerConfig struct {
 	FormatConfig    FormatConfig `json:"format_config"`    // Format-specific config
 }
 
-// FormatConfig holds format-specific configuration
+// Simplified FormatConfig
 type FormatConfig struct {
-	// JSON/XML specific
-	PrettyPrint bool `json:"pretty_print"` // For human-readable JSON/XML
-
-	// CSV specific
-	CSVHeaders   bool `json:"csv_headers"`   // Include headers in CSV
-	CSVDelimiter rune `json:"csv_delimiter"` // Custom delimiter
-
-	// Field customization
-	TimestampField string `json:"timestamp_field"` // Custom field name
-	LevelField     string `json:"level_field"`
-	MessageField   string `json:"message_field"`
-	CallerField    string `json:"caller_field"`
-
-	// Custom fields to include in all formats
-	CustomFields map[string]interface{} `json:"custom_fields"`
+	PrettyPrint  bool                   `json:"pretty_print"`  // For human-readable JSON
+	CSVHeaders   bool                   `json:"csv_headers"`   // Include headers in CSV
+	CSVDelimiter rune                   `json:"csv_delimiter"` // Custom delimiter
+	CustomFields map[string]interface{} `json:"custom_fields"` // Custom fields to include
 }
 
 // Logger is the main logging struct
 type Logger struct {
-	mu                sync.RWMutex   // Protects non-atomic operations
-	level             atomic.Int32   // Atomic log level
-	baseFilename      string         // Base log file path
-	maxBytes          int64          // Max file size
-	backupCount       int            // Number of backups
-	file              *os.File       // Current log file
-	multiWriter       io.Writer      // Combined output
-	bufferPool        sync.Pool      // Reusable buffers
-	timestampFormat   string         // Time format
-	outputs           []io.Writer    // All outputs
-	logsDir           string         // Log directory
-	closed            atomic.Bool    // Atomic closed flag
-	rotateChan        chan struct{}  // Rotation signal
-	rotateCloseChan   chan struct{}  // Rotation stop signal
-	wg                sync.WaitGroup // Background ops
-	enableCaller      bool           // Include caller info
-	asyncQueue        chan *logEntry // Async logging queue
-	asyncCloseChan    chan struct{}  // Async stop signal
-	asyncWorkerCount  int            // Number of async workers
-	format            LogFormat      // Log message format
+	mu                sync.RWMutex
+	level             atomic.Int32
+	baseFilename      string
+	maxBytes          int64
+	backupCount       int
+	file              *os.File
+	multiWriter       io.Writer
+	bufferPool        sync.Pool
+	timestampFormat   string
+	outputs           []io.Writer
+	logsDir           string
+	closed            atomic.Bool
+	rotateChan        chan struct{}
+	rotateCloseChan   chan struct{}
+	wg                sync.WaitGroup
+	enableCaller      bool
+	asyncQueue        chan *logEntry
+	asyncCloseChan    chan struct{}
+	asyncWorkerCount  int
+	format            LogFormat
 	formatConfig      FormatConfig
-	csvHeadersWritten bool // For CSV header tracking
+	csvHeadersWritten bool
 }
 
 type logEntry struct {
@@ -116,12 +101,10 @@ type logEntry struct {
 	callerInfo string
 }
 
-// String returns the string representation of the LogLevel
 func (l LogLevel) String() string {
 	return [...]string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"}[l]
 }
 
-// ParseLogLevel converts a string to a LogLevel
 func ParseLogLevel(level string) (LogLevel, error) {
 	switch strings.ToUpper(level) {
 	case "DEBUG":
@@ -139,7 +122,6 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
-// DefaultConfig returns a LoggerConfig with default values
 func DefaultConfig() LoggerConfig {
 	return LoggerConfig{
 		Filename:        "app",
@@ -150,22 +132,15 @@ func DefaultConfig() LoggerConfig {
 		LogsDir:         defaultLogsDir,
 		EnableCaller:    true,
 		BufferSize:      0, // Sync by default
-		AsyncWorkers:    1, // Default workers if async enabled
+		AsyncWorkers:    1,
 		Format:          FormatPlain,
-		// In DefaultConfig():
 		FormatConfig: FormatConfig{
-			TimestampField: "timestamp",
-			LevelField:     "level",
-			MessageField:   "message",
-			CallerField:    "caller",
-			CSVDelimiter:   ',',
+			CSVDelimiter: ',',
 		},
 	}
 }
 
-// NewGourdianLogger creates a new configured logger instance
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
-	// Apply defaults with validation
 	if config.MaxBytes <= 0 {
 		config.MaxBytes = defaultMaxBytes
 	}
@@ -185,7 +160,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		config.AsyncWorkers = 1
 	}
 
-	// Clean filename and ensure directory exists
 	config.Filename = strings.TrimSpace(strings.TrimSuffix(config.Filename, ".log"))
 	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
@@ -204,13 +178,11 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Setup outputs with stdout and file as defaults
-	outputs := []io.Writer{file, os.Stdout} // File and stdout
+	outputs := []io.Writer{file, os.Stdout}
 	if config.Outputs != nil {
 		outputs = append(outputs, config.Outputs...)
 	}
 
-	// Filter out nil writers
 	validOutputs := make([]io.Writer, 0, len(outputs))
 	for _, w := range outputs {
 		if w != nil {
@@ -231,6 +203,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		enableCaller:     config.EnableCaller,
 		asyncWorkerCount: config.AsyncWorkers,
 		format:           config.Format,
+		formatConfig:     config.FormatConfig,
 	}
 
 	logger.level.Store(int32(config.LogLevel))
@@ -239,11 +212,9 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return new(bytes.Buffer)
 	}
 
-	// Start background workers
 	logger.wg.Add(1)
 	go logger.rotationWorker()
 
-	// Setup async logging if enabled
 	if config.BufferSize > 0 {
 		logger.asyncQueue = make(chan *logEntry, config.BufferSize)
 		logger.asyncCloseChan = make(chan struct{})
@@ -257,7 +228,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-// rotationWorker handles log file rotation in the background
 func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
 
@@ -275,7 +245,6 @@ func (l *Logger) rotationWorker() {
 	}
 }
 
-// asyncWorker processes log entries asynchronously
 func (l *Logger) asyncWorker() {
 	defer l.wg.Done()
 
@@ -284,7 +253,6 @@ func (l *Logger) asyncWorker() {
 		case entry := <-l.asyncQueue:
 			l.processLogEntry(entry.level, entry.message, entry.callerInfo)
 		case <-l.asyncCloseChan:
-			// Drain remaining messages
 			for {
 				select {
 				case entry := <-l.asyncQueue:
@@ -343,38 +311,33 @@ func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) 
 }
 
 func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) string {
-	logEntry := struct {
-		Timestamp string `json:"timestamp"`
-		Level     string `json:"level"`
-		Caller    string `json:"caller,omitempty"`
-		Message   string `json:"message"`
-	}{
-		Timestamp: time.Now().Format(l.timestampFormat),
-		Level:     level.String(),
-		Message:   message,
+	logEntry := map[string]interface{}{
+		"timestamp": time.Now().Format(l.timestampFormat),
+		"level":     level.String(),
+		"message":   message,
 	}
 
 	if l.enableCaller && callerInfo != "" {
-		logEntry.Caller = callerInfo
+		logEntry["caller"] = callerInfo
 	}
 
-	jsonData, err := json.Marshal(logEntry)
+	for k, v := range l.formatConfig.CustomFields {
+		logEntry[k] = v
+	}
+
+	var jsonData []byte
+	var err error
+
+	if l.formatConfig.PrettyPrint {
+		jsonData, err = json.MarshalIndent(logEntry, "", "  ")
+	} else {
+		jsonData, err = json.Marshal(logEntry)
+	}
+
 	if err != nil {
 		return fmt.Sprintf(`{"error":"failed to marshal log entry: %v"}`, err)
 	}
 	return string(jsonData) + "\n"
-}
-
-// Update all format functions to accept callerInfo
-func (l *Logger) formatCLF(level LogLevel, message string, callerInfo string) string {
-	// Common Log Format: host ident authuser date request status bytes
-	// Simplified version for general logging
-	return fmt.Sprintf("%s - - [%s] %q %s\n",
-		"localhost", // Could be made configurable
-		time.Now().Format("02/Jan/2006:15:04:05 -0700"),
-		message,
-		level.String(),
-	)
 }
 
 func (l *Logger) formatGELF(level LogLevel, message string, callerInfo string) string {
@@ -390,6 +353,10 @@ func (l *Logger) formatGELF(level LogLevel, message string, callerInfo string) s
 		gelf["_caller"] = callerInfo
 	}
 
+	for k, v := range l.formatConfig.CustomFields {
+		gelf["_"+k] = v
+	}
+
 	jsonData, err := json.Marshal(gelf)
 	if err != nil {
 		return fmt.Sprintf(`{"error":"failed to marshal GELF entry: %v"}`, err)
@@ -397,94 +364,37 @@ func (l *Logger) formatGELF(level LogLevel, message string, callerInfo string) s
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) formatLogfmt(level LogLevel, message string, callerInfo string) string {
-	var buf strings.Builder
-
-	// Timestamp
-	buf.WriteString(fmt.Sprintf("ts=%q ", time.Now().Format(l.timestampFormat)))
-
-	// Level
-	buf.WriteString(fmt.Sprintf("level=%s ", strings.ToLower(level.String())))
-
-	// Message
-	buf.WriteString(fmt.Sprintf("msg=%q ", message))
-
-	// Caller info
-	if l.enableCaller && callerInfo != "" {
-		buf.WriteString(fmt.Sprintf("caller=%q ", callerInfo))
-	}
-
-	// Custom fields
-	for k, v := range l.formatConfig.CustomFields {
-		buf.WriteString(fmt.Sprintf("%s=%v ", k, v))
-	}
-
-	return strings.TrimSpace(buf.String()) + "\n"
-}
-
 func (l *Logger) formatCSV(level LogLevel, message string, callerInfo string) string {
-	var buf strings.Builder
+	buf := new(bytes.Buffer)
+	w := csv.NewWriter(buf)
+	w.Comma = l.formatConfig.CSVDelimiter
+
+	record := []string{
+		time.Now().Format(l.timestampFormat),
+		level.String(),
+		message,
+	}
+
+	if l.enableCaller {
+		record = append(record, callerInfo)
+	}
 
 	if l.formatConfig.CSVHeaders && !l.csvHeadersWritten {
-		buf.WriteString("timestamp,level,message,caller\n")
+		headers := []string{"timestamp", "level", "message"}
+		if l.enableCaller {
+			headers = append(headers, "caller")
+		}
+		w.Write(headers)
 		l.csvHeadersWritten = true
 	}
 
-	// Timestamp
-	buf.WriteString(fmt.Sprintf("%q%c", time.Now().Format(l.timestampFormat), l.formatConfig.CSVDelimiter))
+	w.Write(record)
+	w.Flush()
 
-	// Level
-	buf.WriteString(fmt.Sprintf("%q%c", level.String(), l.formatConfig.CSVDelimiter))
-
-	// Message
-	buf.WriteString(fmt.Sprintf("%q%c", message, l.formatConfig.CSVDelimiter))
-
-	// Caller info
-	if l.enableCaller && callerInfo != "" {
-		buf.WriteString(fmt.Sprintf("%q", callerInfo))
-	}
-
-	return buf.String() + "\n"
-}
-
-func (l *Logger) formatXML(level LogLevel, message string, callerInfo string) string {
-	type LogEntry struct {
-		Timestamp string                 `xml:"timestamp"`
-		Level     string                 `xml:"level"`
-		Message   string                 `xml:"message"`
-		Caller    string                 `xml:"caller,omitempty"`
-		Custom    map[string]interface{} `xml:"custom>field"`
-	}
-
-	entry := LogEntry{
-		Timestamp: time.Now().Format(l.timestampFormat),
-		Level:     level.String(),
-		Message:   message,
-		Custom:    l.formatConfig.CustomFields,
-	}
-
-	if l.enableCaller && callerInfo != "" {
-		entry.Caller = callerInfo
-	}
-
-	var xmlData []byte
-	var err error
-
-	if l.formatConfig.PrettyPrint {
-		xmlData, err = xml.MarshalIndent(entry, "", "  ")
-	} else {
-		xmlData, err = xml.Marshal(entry)
-	}
-
-	if err != nil {
-		return fmt.Sprintf("<error>failed to marshal XML entry: %v</error>\n", err)
-	}
-
-	return string(xmlData) + "\n"
+	return buf.String()
 }
 
 func (l *Logger) formatCEF(level LogLevel, message string, callerInfo string) string {
-	// Common Event Format for security logging
 	var exts []string
 
 	if l.enableCaller && callerInfo != "" {
@@ -536,16 +446,10 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 	switch l.format {
 	case FormatJSON:
 		return l.formatJSON(level, message, callerInfo)
-	case FormatCLF:
-		return l.formatCLF(level, message, callerInfo)
 	case FormatGELF:
 		return l.formatGELF(level, message, callerInfo)
-	case FormatLogfmt:
-		return l.formatLogfmt(level, message, callerInfo)
 	case FormatCSV:
 		return l.formatCSV(level, message, callerInfo)
-	case FormatXML:
-		return l.formatXML(level, message, callerInfo)
 	case FormatCEF:
 		return l.formatCEF(level, message, callerInfo)
 	default:
@@ -735,7 +639,6 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 
 // WithConfig creates a new logger from JSON config
 func WithConfig(jsonConfig string) (*Logger, error) {
-	// First, validate the JSON is valid
 	if !json.Valid([]byte(jsonConfig)) {
 		return nil, fmt.Errorf("invalid JSON config")
 	}
@@ -745,12 +648,10 @@ func WithConfig(jsonConfig string) (*Logger, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Set default logs directory if not specified
 	if config.LogsDir == "" {
 		config.LogsDir = defaultLogsDir
 	}
 
-	// Ensure logs directory exists
 	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory '%s': %w", config.LogsDir, err)
 	}
@@ -786,8 +687,6 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 			lc.Format = FormatPlain
 		case "JSON":
 			lc.Format = FormatJSON
-		case "CLF":
-			lc.Format = FormatCLF
 		case "GELF":
 			lc.Format = FormatGELF
 		default:
