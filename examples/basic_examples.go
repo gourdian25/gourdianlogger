@@ -405,12 +405,19 @@ func cefExample() {
 	logger.Warn("Failed login attempt")
 	logger.Error("Brute force attack detected")
 }
-
 func jsonConfigExample() {
 	jsonConfig := `{
         "filename": "config_log",
+        "max_bytes": 3145728,
+        "backup_count": 7,
+        "log_level": "WARN",
+        "timestamp_format": "2006-01-02T15:04:05.000Z07:00",
+        "logs_dir": "json_logs",
+        "enable_caller": false,
+        "buffer_size": 500,
+        "async_workers": 3,
+        "show_banner": false,
         "format": "GELF",
-        "log_level": "INFO",
         "format_config": {
             "custom_fields": {
                 "app": "inventory",
@@ -422,10 +429,15 @@ func jsonConfigExample() {
 
 	logger, err := gourdianlogger.WithConfig(jsonConfig)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Failed to create logger from JSON: %v\n", err)
+		return
 	}
 	defer logger.Close()
 
-	logger.Info("Inventory updated")
-	logger.Warn("Low stock alert")
+	logger.Info("Inventory service started")
+	logger.Warn("Low stock warning")
+	logger.Error("Database connection failed")
+
+	logger.Flush()
+	fmt.Println("Check the json_logs directory for output files")
 }

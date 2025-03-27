@@ -778,9 +778,14 @@ func WithConfig(jsonConfig string) (*Logger, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Set default logs directory if not specified
+	if config.LogsDir == "" {
+		config.LogsDir = defaultLogsDir
+	}
+
 	// Ensure logs directory exists
 	if err := os.MkdirAll(config.LogsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create log directory: %w", err)
+		return nil, fmt.Errorf("failed to create log directory '%s': %w", config.LogsDir, err)
 	}
 
 	return NewGourdianLogger(config)
