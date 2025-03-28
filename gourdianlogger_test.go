@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestMain sets up and tears down any test dependencies
@@ -228,7 +229,12 @@ func TestLogFormats(t *testing.T) {
 		check  func(string) bool
 	}{
 		{"Plain", FormatPlain, func(s string) bool {
-			return strings.Contains(s, "[INFO]") && strings.Contains(s, "test message")
+			// The plain format includes timestamp, level, caller info, and message
+			// We'll check for these components separately
+			hasTimestamp := strings.Contains(s, time.Now().Format("2006-01-02"))
+			hasLevel := strings.Contains(s, "[INFO]")
+			hasMessage := strings.Contains(s, "test message")
+			return hasTimestamp && hasLevel && hasMessage
 		}},
 		{"JSON", FormatJSON, func(s string) bool {
 			var data map[string]interface{}
@@ -239,7 +245,8 @@ func TestLogFormats(t *testing.T) {
 			return json.Unmarshal([]byte(s), &data) == nil && data["short_message"] == "test message"
 		}},
 		{"CSV", FormatCSV, func(s string) bool {
-			return strings.Count(s, ",") >= 2 // timestamp,level,message
+			parts := strings.Split(s, ",")
+			return len(parts) >= 3 && parts[1] == "INFO" // timestamp,level,message,...
 		}},
 		{"CEF", FormatCEF, func(s string) bool {
 			return strings.HasPrefix(s, "CEF:") && strings.Contains(s, "test message")
@@ -252,6 +259,8 @@ func TestLogFormats(t *testing.T) {
 			config := DefaultConfig()
 			config.Format = tt.format
 			config.Outputs = []io.Writer{&buf}
+			config.LogsDir = "test_logs" // Use test directory
+			config.EnableCaller = true   // Ensure caller info is included for consistency
 
 			logger, err := NewGourdianLogger(config)
 			if err != nil {
@@ -261,8 +270,9 @@ func TestLogFormats(t *testing.T) {
 
 			logger.Info("test message")
 
-			if !tt.check(buf.String()) {
-				t.Errorf("Format validation failed for %s: %s", tt.name, buf.String())
+			output := buf.String()
+			if !tt.check(output) {
+				t.Errorf("Format validation failed for %s.\nGot: %q", tt.name, output)
 			}
 		})
 	}
@@ -471,7 +481,7 @@ func TestRaceConditions(t *testing.T) {
 }
 
 func TestFatal(t *testing.T) {
-	if os.Getenv("TEST_FATAL") == "1" {
+	if os.Getenv("BE_CRASHER") == "1" {
 		config := DefaultConfig()
 		config.LogsDir = "test_logs"
 		config.Outputs = []io.Writer{ioutil.Discard}
@@ -485,15 +495,13 @@ func TestFatal(t *testing.T) {
 		return
 	}
 
+	// Run the test in a subprocess
 	cmd := exec.Command(os.Args[0], "-test.run=TestFatal")
-	cmd.Env = append(os.Environ(), "TEST_FATAL=1")
+	cmd.Env = append(os.Environ(), "BE_CRASHER=1")
 	err := cmd.Run()
 
-	// Correct way to check for exit status
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		if !exitErr.Success() {
-			return // Expected non-zero exit status
-		}
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return // This is what we expect
 	}
 	t.Fatalf("process ran with err %v, want exit status 1", err)
 }
