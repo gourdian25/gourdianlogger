@@ -240,17 +240,6 @@ func TestLogFormats(t *testing.T) {
 			var data map[string]interface{}
 			return json.Unmarshal([]byte(s), &data) == nil && data["level"] == "INFO"
 		}},
-		{"GELF", FormatGELF, func(s string) bool {
-			var data map[string]interface{}
-			return json.Unmarshal([]byte(s), &data) == nil && data["short_message"] == "test message"
-		}},
-		{"CSV", FormatCSV, func(s string) bool {
-			parts := strings.Split(s, ",")
-			return len(parts) >= 3 && parts[1] == "INFO" // timestamp,level,message,...
-		}},
-		{"CEF", FormatCEF, func(s string) bool {
-			return strings.HasPrefix(s, "CEF:") && strings.Contains(s, "test message")
-		}},
 	}
 
 	for _, tt := range tests {

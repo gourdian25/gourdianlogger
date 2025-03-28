@@ -2,14 +2,12 @@ package gourdianlogger
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,9 +31,6 @@ type LogFormat int
 const (
 	FormatPlain LogFormat = iota // Default plain text format
 	FormatJSON                   // JSON format
-	FormatGELF                   // Graylog Extended Log Format
-	FormatCSV                    // Comma-separated values
-	FormatCEF                    // Common Event Format (for security)
 )
 
 var (
@@ -64,35 +59,32 @@ type LoggerConfig struct {
 // Simplified FormatConfig
 type FormatConfig struct {
 	PrettyPrint  bool                   `json:"pretty_print"`  // For human-readable JSON
-	CSVHeaders   bool                   `json:"csv_headers"`   // Include headers in CSV
-	CSVDelimiter rune                   `json:"csv_delimiter"` // Custom delimiter
 	CustomFields map[string]interface{} `json:"custom_fields"` // Custom fields to include
 }
 
 // Logger is the main logging struct
 type Logger struct {
-	mu                sync.RWMutex
-	level             atomic.Int32
-	baseFilename      string
-	maxBytes          int64
-	backupCount       int
-	file              *os.File
-	multiWriter       io.Writer
-	bufferPool        sync.Pool
-	timestampFormat   string
-	outputs           []io.Writer
-	logsDir           string
-	closed            atomic.Bool
-	rotateChan        chan struct{}
-	rotateCloseChan   chan struct{}
-	wg                sync.WaitGroup
-	enableCaller      bool
-	asyncQueue        chan *logEntry
-	asyncCloseChan    chan struct{}
-	asyncWorkerCount  int
-	format            LogFormat
-	formatConfig      FormatConfig
-	csvHeadersWritten bool
+	mu               sync.RWMutex
+	level            atomic.Int32
+	baseFilename     string
+	maxBytes         int64
+	backupCount      int
+	file             *os.File
+	multiWriter      io.Writer
+	bufferPool       sync.Pool
+	timestampFormat  string
+	outputs          []io.Writer
+	logsDir          string
+	closed           atomic.Bool
+	rotateChan       chan struct{}
+	rotateCloseChan  chan struct{}
+	wg               sync.WaitGroup
+	enableCaller     bool
+	asyncQueue       chan *logEntry
+	asyncCloseChan   chan struct{}
+	asyncWorkerCount int
+	format           LogFormat
+	formatConfig     FormatConfig
 }
 
 type logEntry struct {
@@ -134,9 +126,7 @@ func DefaultConfig() LoggerConfig {
 		BufferSize:      0, // Sync by default
 		AsyncWorkers:    1,
 		Format:          FormatPlain,
-		FormatConfig: FormatConfig{
-			CSVDelimiter: ',',
-		},
+		FormatConfig:    FormatConfig{},
 	}
 }
 
@@ -165,12 +155,11 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	// In NewGourdianLogger, after directory creation:
 	absLogsDir, err := filepath.Abs(config.LogsDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for logs directory: %w", err)
 	}
-	fmt.Printf("Logs will be written to: %s\n", absLogsDir) // Debug output
+	fmt.Printf("Logs will be written to: %s\n", absLogsDir)
 
 	logPath := filepath.Join(config.LogsDir, config.Filename+".log")
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -340,105 +329,23 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) s
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) formatGELF(level LogLevel, message string, callerInfo string) string {
-	gelf := map[string]interface{}{
-		"version":       "1.1",
-		"host":          "localhost",
-		"short_message": message,
-		"timestamp":     float64(time.Now().UnixNano()) / 1e9,
-		"level":         int32(level),
-	}
-
-	if l.enableCaller && callerInfo != "" {
-		gelf["_caller"] = callerInfo
-	}
-
-	for k, v := range l.formatConfig.CustomFields {
-		gelf["_"+k] = v
-	}
-
-	jsonData, err := json.Marshal(gelf)
-	if err != nil {
-		return fmt.Sprintf(`{"error":"failed to marshal GELF entry: %v"}`, err)
-	}
-	return string(jsonData) + "\n"
-}
-
-func (l *Logger) formatCSV(level LogLevel, message string, callerInfo string) string {
-	buf := new(bytes.Buffer)
-	w := csv.NewWriter(buf)
-	w.Comma = l.formatConfig.CSVDelimiter
-
-	record := []string{
-		time.Now().Format(l.timestampFormat),
-		level.String(),
-		message,
-	}
-
-	if l.enableCaller {
-		record = append(record, callerInfo)
-	}
-
-	if l.formatConfig.CSVHeaders && !l.csvHeadersWritten {
-		headers := []string{"timestamp", "level", "message"}
-		if l.enableCaller {
-			headers = append(headers, "caller")
-		}
-		w.Write(headers)
-		l.csvHeadersWritten = true
-	}
-
-	w.Write(record)
-	w.Flush()
-
-	return buf.String()
-}
-
-func (l *Logger) formatCEF(level LogLevel, message string, callerInfo string) string {
-	var exts []string
-
-	if l.enableCaller && callerInfo != "" {
-		exts = append(exts, fmt.Sprintf("cs1=%s", callerInfo))
-	}
-
-	for k, v := range l.formatConfig.CustomFields {
-		exts = append(exts, fmt.Sprintf("%s=%v", k, v))
-	}
-
-	return fmt.Sprintf("CEF:0|GourdianLogger|Logger|1.0|%d|%s|%d|%s\n",
-		level,
-		message,
-		time.Now().Unix(),
-		strings.Join(exts, " "),
-	)
-}
-
 func (l *Logger) getCallerInfo(skip int) string {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
 		return ""
 	}
 
-	// Get just the file name
 	fileName := filepath.Base(file)
-
-	// Get the function name
 	fn := runtime.FuncForPC(pc)
 	if fn == nil {
 		return fmt.Sprintf("%s:%d", fileName, line)
 	}
 
-	// Get full function name with package path
 	fullFnName := fn.Name()
-
-	// Simplify the function name:
-	// 1. Remove the package path (everything before last '/')
-	// 2. Keep the package name and function name
 	if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash >= 0 {
 		fullFnName = fullFnName[lastSlash+1:]
 	}
 
-	// For methods, keep the receiver type
 	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
@@ -446,12 +353,6 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 	switch l.format {
 	case FormatJSON:
 		return l.formatJSON(level, message, callerInfo)
-	case FormatGELF:
-		return l.formatGELF(level, message, callerInfo)
-	case FormatCSV:
-		return l.formatCSV(level, message, callerInfo)
-	case FormatCEF:
-		return l.formatCEF(level, message, callerInfo)
 	default:
 		return l.formatPlain(level, message, callerInfo)
 	}
@@ -474,51 +375,25 @@ func (l *Logger) log(level LogLevel, message string, skip int) {
 	}
 }
 
-// rotateLogFiles performs log rotation
 func (l *Logger) rotateLogFiles() error {
-	// Close current file
 	if err := l.file.Close(); err != nil {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
 
-	// Generate new filename with timestamp
 	baseWithoutExt := strings.TrimSuffix(l.baseFilename, ".log")
 	timestamp := time.Now().Format("20060102_150405")
 	newLogFilePath := fmt.Sprintf("%s_%s.log", baseWithoutExt, timestamp)
 
-	// Rename current log file
 	if err := os.Rename(l.baseFilename, newLogFilePath); err != nil {
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
-	// Get list of backup files
-	backupFiles, err := filepath.Glob(baseWithoutExt + "_*.log")
-	if err != nil {
-		return fmt.Errorf("failed to list backup files: %w", err)
-	}
-
-	// Sort backups by name (which includes timestamp)
-	sort.Strings(backupFiles)
-
-	// Remove oldest backups if we have too many
-	if len(backupFiles) > l.backupCount {
-		for _, oldFile := range backupFiles[:len(backupFiles)-l.backupCount] {
-			if err := os.Remove(oldFile); err != nil {
-				return fmt.Errorf("failed to remove old log file %s: %w", oldFile, err)
-			}
-		}
-	}
-
-	// Create new log file
 	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create new log file: %w", err)
 	}
 
-	// Update logger state
 	l.file = file
-
-	// Rebuild outputs with new file
 	outputs := []io.Writer{os.Stdout, file}
 	if len(l.outputs) > 2 {
 		outputs = append(outputs, l.outputs[2:]...)
@@ -529,17 +404,14 @@ func (l *Logger) rotateLogFiles() error {
 	return nil
 }
 
-// SetLogLevel changes the minimum log level
 func (l *Logger) SetLogLevel(level LogLevel) {
 	l.level.Store(int32(level))
 }
 
-// GetLogLevel returns the current log level
 func (l *Logger) GetLogLevel() LogLevel {
 	return LogLevel(l.level.Load())
 }
 
-// AddOutput adds a new output destination
 func (l *Logger) AddOutput(output io.Writer) {
 	if output == nil {
 		return
@@ -556,7 +428,6 @@ func (l *Logger) AddOutput(output io.Writer) {
 	l.multiWriter = io.MultiWriter(l.outputs...)
 }
 
-// RemoveOutput removes an output destination
 func (l *Logger) RemoveOutput(output io.Writer) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -574,36 +445,29 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 	}
 }
 
-// Close cleanly shuts down the logger
 func (l *Logger) Close() error {
 	if !l.closed.CompareAndSwap(false, true) {
-		return nil // Already closed
+		return nil
 	}
 
-	// Stop background workers
 	close(l.rotateCloseChan)
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
 	l.wg.Wait()
 
-	// Close file and clean up
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.file.Close()
 }
 
-// Logging methods
-
 func (l *Logger) Debug(v ...interface{}) {
-	l.log(DEBUG, fmt.Sprint(v...), 3) // Skip 3 frames to get to actual caller
+	l.log(DEBUG, fmt.Sprint(v...), 3)
 }
 
 func (l *Logger) Info(v ...interface{}) {
-	l.log(INFO, fmt.Sprint(v...), 3) // Skip 3 frames to get to actual caller
+	l.log(INFO, fmt.Sprint(v...), 3)
 }
-
-// Update all other logging methods similarly...
 
 func (l *Logger) Warn(v ...interface{}) {
 	l.log(WARN, fmt.Sprint(v...), 3)
@@ -637,7 +501,6 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), 3)
 }
 
-// WithConfig creates a new logger from JSON config
 func WithConfig(jsonConfig string) (*Logger, error) {
 	if !json.Valid([]byte(jsonConfig)) {
 		return nil, fmt.Errorf("invalid JSON config")
@@ -673,22 +536,18 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Parse log level
 	level, err := ParseLogLevel(aux.LogLevelStr)
 	if err != nil {
 		return err
 	}
 	lc.LogLevel = level
 
-	// Parse format
 	if aux.FormatStr != "" {
 		switch strings.ToUpper(aux.FormatStr) {
 		case "PLAIN":
 			lc.Format = FormatPlain
 		case "JSON":
 			lc.Format = FormatJSON
-		case "GELF":
-			lc.Format = FormatGELF
 		default:
 			return fmt.Errorf("invalid log format: %s", aux.FormatStr)
 		}
@@ -697,17 +556,14 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Flush ensures all buffered logs are written (for async mode)
 func (l *Logger) Flush() {
 	if l.asyncQueue != nil {
-		// Wait for queue to drain
 		for len(l.asyncQueue) > 0 {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
 
-// IsClosed checks if logger is closed
 func (l *Logger) IsClosed() bool {
 	return l.closed.Load()
 }

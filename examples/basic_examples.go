@@ -21,9 +21,6 @@ func main() {
 		dynamicConfigurationDemo,
 		plainTextExample,
 		jsonExample,
-		csvExample,
-		gelfExample,
-		cefExample,
 		jsonConfigExample,
 	}
 
@@ -276,69 +273,6 @@ func jsonExample() {
 
 	logger.Info("This is a JSON log entry")
 	logger.Error("Error with stack trace")
-}
-
-func csvExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "csv_log"
-	config.Format = gourdianlogger.FormatCSV
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		CSVHeaders:   true,
-		CSVDelimiter: '|', // Pipe delimiter instead of comma
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Info("Starting service")
-	logger.Info("Processing request")
-	logger.Error("Database connection failed")
-}
-
-func gelfExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "gelf_log"
-	config.Format = gourdianlogger.FormatGELF
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		CustomFields: map[string]interface{}{
-			"_service": "payment",
-			"_pod":     "payment-7865d4f96-abc12",
-		},
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Info("Payment processed")
-	logger.Error("Payment failed with invalid card")
-}
-
-func cefExample() {
-	config := gourdianlogger.DefaultConfig()
-	config.Filename = "cef_log"
-	config.Format = gourdianlogger.FormatCEF
-	config.FormatConfig = gourdianlogger.FormatConfig{
-		CustomFields: map[string]interface{}{
-			"src": "192.168.1.100",
-			"dst": "10.0.0.5",
-			"act": "login",
-		},
-	}
-
-	logger, err := gourdianlogger.NewGourdianLogger(config)
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Close()
-
-	logger.Warn("Failed login attempt")
-	logger.Error("Brute force attack detected")
 }
 
 func jsonConfigExample() {
