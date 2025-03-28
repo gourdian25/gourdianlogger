@@ -636,48 +636,6 @@ func TestCallerInfo(t *testing.T) {
 	}
 }
 
-// BenchmarkLogging benchmarks the performance of logging
-func BenchmarkLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.LogsDir = "test_logs"
-	config.Filename = "benchmark"
-	config.Outputs = []io.Writer{io.Discard}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark log message")
-	}
-}
-
-// BenchmarkConcurrentLogging benchmarks concurrent log writes
-func BenchmarkConcurrentLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.LogsDir = "test_logs"
-	config.Filename = "benchmark_concurrent"
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
-	config.Outputs = []io.Writer{io.Discard}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			logger.Info("concurrent benchmark log message")
-		}
-	})
-}
-
 // TestRaceConditions runs tests with race detector
 func TestRaceConditions(t *testing.T) {
 	t.Parallel()
