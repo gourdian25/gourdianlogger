@@ -283,7 +283,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 }
 
 func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) string {
-	levelStr := fmt.Sprintf("%-5s", level.String())
+	levelStr := fmt.Sprintf("[%s]", level.String())
 	timestampStr := time.Now().Format(l.timestampFormat)
 
 	var callerPart string
@@ -291,7 +291,7 @@ func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) 
 		callerPart = callerInfo + ":"
 	}
 
-	return fmt.Sprintf("%s [%s] %s%s\n",
+	return fmt.Sprintf("%s %s %s%s\n",
 		timestampStr,
 		levelStr,
 		callerPart,
@@ -532,17 +532,31 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		Alias: (*Alias)(lc),
 	}
 
+	// If the input is just an empty object, use default values
+	if string(data) == "{}" {
+		*lc = DefaultConfig()
+		return nil
+	}
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
-	level, err := ParseLogLevel(aux.LogLevelStr)
-	if err != nil {
-		return err
+	// Set default log level if not specified
+	if aux.LogLevelStr == "" {
+		lc.LogLevel = DEBUG
+	} else {
+		level, err := ParseLogLevel(aux.LogLevelStr)
+		if err != nil {
+			return err
+		}
+		lc.LogLevel = level
 	}
-	lc.LogLevel = level
 
-	if aux.FormatStr != "" {
+	// Set default format if not specified
+	if aux.FormatStr == "" {
+		lc.Format = FormatPlain
+	} else {
 		switch strings.ToUpper(aux.FormatStr) {
 		case "PLAIN":
 			lc.Format = FormatPlain
