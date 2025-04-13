@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -131,6 +132,7 @@ func DefaultConfig() LoggerConfig {
 }
 
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
+	// Set defaults
 	if config.MaxBytes <= 0 {
 		config.MaxBytes = defaultMaxBytes
 	}
@@ -155,12 +157,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	absLogsDir, err := filepath.Abs(config.LogsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path for logs directory: %w", err)
-	}
-	fmt.Printf("Logs will be written to: %s\n", absLogsDir)
-
 	logPath := filepath.Join(config.LogsDir, config.Filename+".log")
 	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -171,7 +167,6 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	if config.Outputs != nil {
 		outputs = append(outputs, config.Outputs...)
 	}
-
 	validOutputs := make([]io.Writer, 0, len(outputs))
 	for _, w := range outputs {
 		if w != nil {
@@ -215,6 +210,13 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	}
 
 	return logger, nil
+}
+
+// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values.
+// It returns a ready-to-use *Logger instance or an error if setup fails.
+func NewGourdianLoggerWithDefault() (*Logger, error) {
+	config := DefaultConfig()
+	return NewGourdianLogger(config)
 }
 
 func (l *Logger) rotationWorker() {
@@ -380,11 +382,11 @@ func (l *Logger) rotateLogFiles() error {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
 
-	baseWithoutExt := strings.TrimSuffix(l.baseFilename, ".log")
+	base := strings.TrimSuffix(l.baseFilename, ".log")
 	timestamp := time.Now().Format("20060102_150405")
-	newLogFilePath := fmt.Sprintf("%s_%s.log", baseWithoutExt, timestamp)
+	backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
-	if err := os.Rename(l.baseFilename, newLogFilePath); err != nil {
+	if err := os.Rename(l.baseFilename, backupPath); err != nil {
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
@@ -401,7 +403,24 @@ func (l *Logger) rotateLogFiles() error {
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
 
+	l.cleanupOldBackups()
 	return nil
+}
+
+func (l *Logger) cleanupOldBackups() {
+	pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log"
+	files, err := filepath.Glob(pattern)
+	if err != nil || len(files) <= l.backupCount {
+		return
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i] < files[j] // oldest first
+	})
+
+	for _, f := range files[:len(files)-l.backupCount] {
+		_ = os.Remove(f)
+	}
 }
 
 func (l *Logger) SetLogLevel(level LogLevel) {
@@ -479,6 +498,8 @@ func (l *Logger) Error(v ...interface{}) {
 
 func (l *Logger) Fatal(v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), 3)
+	l.Flush()
+	os.Exit(1)
 }
 
 func (l *Logger) Debugf(format string, v ...interface{}) {
@@ -499,6 +520,8 @@ func (l *Logger) Errorf(format string, v ...interface{}) {
 
 func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), 3)
+	l.Flush()
+	os.Exit(1)
 }
 
 func WithConfig(jsonConfig string) (*Logger, error) {
