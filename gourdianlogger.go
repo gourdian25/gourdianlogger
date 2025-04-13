@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -48,18 +47,21 @@ var (
 )
 
 // LoggerConfig holds configuration for the logger
+// LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
 	Filename        string        `json:"filename"`         // Base filename for logs
 	MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
 	BackupCount     int           `json:"backup_count"`     // Number of backups to keep
-	LogLevel        LogLevel      `json:"log_level"`        // Minimum log level
+	LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
+	LogLevelStr     string        `json:"log_level"`        // Log level as string (for config)
 	TimestampFormat string        `json:"timestamp_format"` // Custom timestamp format
 	Outputs         []io.Writer   `json:"-"`                // Additional outputs
 	LogsDir         string        `json:"logs_dir"`         // Directory for log files
 	EnableCaller    bool          `json:"enable_caller"`    // Include caller info
 	BufferSize      int           `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int           `json:"async_workers"`    // Number of async workers
-	Format          LogFormat     `json:"format"`           // Log message format
+	Format          LogFormat     `json:"-"`                // Log message format (internal use)
+	FormatStr       string        `json:"format"`           // Format as string (for config)
 	FormatConfig    FormatConfig  `json:"format_config"`    // Format-specific config
 	EnableFallback  bool          `json:"enable_fallback"`  // Whether to use fallback logging
 	ErrorHandler    func(error)   `json:"-"`                // Custom error handler
@@ -265,26 +267,74 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 // Validate checks the LoggerConfig for valid values
 func (lc *LoggerConfig) Validate() error {
 	if lc.MaxBytes < 0 {
-		return errors.New("MaxBytes cannot be negative")
+		return fmt.Errorf("MaxBytes cannot be negative")
 	}
 	if lc.BackupCount < 0 {
-		return errors.New("BackupCount cannot be negative")
+		return fmt.Errorf("BackupCount cannot be negative")
 	}
 	if lc.BufferSize < 0 {
-		return errors.New("BufferSize cannot be negative")
+		return fmt.Errorf("BufferSize cannot be negative")
 	}
 	if lc.AsyncWorkers < 0 {
-		return errors.New("AsyncWorkers cannot be negative")
+		return fmt.Errorf("AsyncWorkers cannot be negative")
 	}
 	if lc.MaxLogRate < 0 {
-		return errors.New("MaxLogRate cannot be negative")
+		return fmt.Errorf("MaxLogRate cannot be negative")
 	}
 	if lc.SampleRate < 1 {
-		return errors.New("SampleRate must be at least 1")
+		return fmt.Errorf("SampleRate must be at least 1")
 	}
 	if lc.CallerDepth < 1 {
-		return errors.New("CallerDepth must be at least 1")
+		return fmt.Errorf("CallerDepth must be at least 1")
 	}
+
+	// Validate log level if specified
+	if lc.LogLevelStr != "" {
+		if _, err := ParseLogLevel(lc.LogLevelStr); err != nil {
+			return fmt.Errorf("invalid log level: %w", err)
+		}
+	}
+
+	// Validate format if specified
+	if lc.FormatStr != "" {
+		switch strings.ToUpper(lc.FormatStr) {
+		case "PLAIN", "JSON":
+			// valid
+		default:
+			return fmt.Errorf("invalid log format: %s", lc.FormatStr)
+		}
+	}
+
+	return nil
+}
+
+// Complete initializes the internal fields from string representations
+func (lc *LoggerConfig) Complete() error {
+	// Parse log level
+	if lc.LogLevelStr != "" {
+		level, err := ParseLogLevel(lc.LogLevelStr)
+		if err != nil {
+			return fmt.Errorf("invalid log level: %w", err)
+		}
+		lc.LogLevel = level
+	} else {
+		lc.LogLevel = DEBUG // default
+	}
+
+	// Parse format
+	if lc.FormatStr != "" {
+		switch strings.ToUpper(lc.FormatStr) {
+		case "PLAIN":
+			lc.Format = FormatPlain
+		case "JSON":
+			lc.Format = FormatJSON
+		default:
+			return fmt.Errorf("invalid log format: %s", lc.FormatStr)
+		}
+	} else {
+		lc.Format = FormatPlain // default
+	}
+
 	return nil
 }
 
@@ -480,8 +530,8 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, f
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) getCallerInfo() string {
-	pc, file, line, ok := runtime.Caller(l.config.CallerDepth)
+func (l *Logger) getCallerInfo(skip int) string {
+	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
 		return ""
 	}
@@ -517,7 +567,7 @@ func (l *Logger) log(level LogLevel, message string, skip int, fields map[string
 
 	var callerInfo string
 	if l.enableCaller {
-		callerInfo = l.getCallerInfo()
+		callerInfo = l.getCallerInfo(skip)
 	}
 
 	if l.asyncQueue != nil {
