@@ -2,17 +2,23 @@ package gourdianlogger
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // LogLevel represents the severity level of log messages
@@ -43,21 +49,28 @@ var (
 
 // LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
-	Filename        string       `json:"filename"`         // Base filename for logs
-	MaxBytes        int64        `json:"max_bytes"`        // Max file size before rotation
-	BackupCount     int          `json:"backup_count"`     // Number of backups to keep
-	LogLevel        LogLevel     `json:"log_level"`        // Minimum log level
-	TimestampFormat string       `json:"timestamp_format"` // Custom timestamp format
-	Outputs         []io.Writer  `json:"-"`                // Additional outputs
-	LogsDir         string       `json:"logs_dir"`         // Directory for log files
-	EnableCaller    bool         `json:"enable_caller"`    // Include caller info
-	BufferSize      int          `json:"buffer_size"`      // Buffer size for async logging
-	AsyncWorkers    int          `json:"async_workers"`    // Number of async workers
-	Format          LogFormat    `json:"format"`           // Log message format
-	FormatConfig    FormatConfig `json:"format_config"`    // Format-specific config
+	Filename        string        `json:"filename"`         // Base filename for logs
+	MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
+	BackupCount     int           `json:"backup_count"`     // Number of backups to keep
+	LogLevel        LogLevel      `json:"log_level"`        // Minimum log level
+	TimestampFormat string        `json:"timestamp_format"` // Custom timestamp format
+	Outputs         []io.Writer   `json:"-"`                // Additional outputs
+	LogsDir         string        `json:"logs_dir"`         // Directory for log files
+	EnableCaller    bool          `json:"enable_caller"`    // Include caller info
+	BufferSize      int           `json:"buffer_size"`      // Buffer size for async logging
+	AsyncWorkers    int           `json:"async_workers"`    // Number of async workers
+	Format          LogFormat     `json:"format"`           // Log message format
+	FormatConfig    FormatConfig  `json:"format_config"`    // Format-specific config
+	EnableFallback  bool          `json:"enable_fallback"`  // Whether to use fallback logging
+	ErrorHandler    func(error)   `json:"-"`                // Custom error handler
+	MaxLogRate      int           `json:"max_log_rate"`     // Max logs per second (0 for unlimited)
+	CompressBackups bool          `json:"compress_backups"` // Whether to gzip rotated logs
+	RotationTime    time.Duration `json:"rotation_time"`    // Time-based rotation interval
+	SampleRate      int           `json:"sample_rate"`      // Log sampling rate (1 in N)
+	CallerDepth     int           `json:"caller_depth"`     // How many stack frames to skip
 }
 
-// Simplified FormatConfig
+// FormatConfig contains format-specific configuration
 type FormatConfig struct {
 	PrettyPrint  bool                   `json:"pretty_print"`  // For human-readable JSON
 	CustomFields map[string]interface{} `json:"custom_fields"` // Custom fields to include
@@ -65,33 +78,39 @@ type FormatConfig struct {
 
 // Logger is the main logging struct
 type Logger struct {
-	mu               sync.RWMutex
-	level            atomic.Int32
-	baseFilename     string
-	maxBytes         int64
-	backupCount      int
-	file             *os.File
-	multiWriter      io.Writer
-	bufferPool       sync.Pool
-	timestampFormat  string
-	outputs          []io.Writer
-	logsDir          string
-	closed           atomic.Bool
-	rotateChan       chan struct{}
-	rotateCloseChan  chan struct{}
-	wg               sync.WaitGroup
-	enableCaller     bool
-	asyncQueue       chan *logEntry
-	asyncCloseChan   chan struct{}
-	asyncWorkerCount int
-	format           LogFormat
-	formatConfig     FormatConfig
+	mu              sync.RWMutex
+	level           atomic.Int32
+	baseFilename    string
+	maxBytes        int64
+	backupCount     int
+	file            *os.File
+	multiWriter     io.Writer
+	bufferPool      sync.Pool
+	timestampFormat string
+	outputs         []io.Writer
+	logsDir         string
+	closed          atomic.Bool
+	rotateChan      chan struct{}
+	rotateCloseChan chan struct{}
+	wg              sync.WaitGroup
+	enableCaller    bool
+	asyncQueue      chan *logEntry
+	asyncCloseChan  chan struct{}
+	asyncWorkers    int
+	format          LogFormat
+	formatConfig    FormatConfig
+	fallbackWriter  io.Writer
+	errorHandler    func(error)
+	rateLimiter     *rate.Limiter
+	config          LoggerConfig
+	dynamicLevelFn  func() LogLevel
 }
 
 type logEntry struct {
 	level      LogLevel
 	message    string
 	callerInfo string
+	fields     map[string]interface{}
 }
 
 func (l LogLevel) String() string {
@@ -128,10 +147,24 @@ func DefaultConfig() LoggerConfig {
 		AsyncWorkers:    1,
 		Format:          FormatPlain,
 		FormatConfig:    FormatConfig{},
+		EnableFallback:  true,
+		MaxLogRate:      0, // Unlimited by default
+		CompressBackups: false,
+		RotationTime:    0, // No time-based rotation by default
+		SampleRate:      1, // No sampling by default
+		CallerDepth:     3, // Default skip 3 frames
 	}
 }
 
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
+	// Apply environment variable overrides
+	config.ApplyEnvOverrides()
+
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	// Set defaults
 	if config.MaxBytes <= 0 {
 		config.MaxBytes = defaultMaxBytes
@@ -150,6 +183,9 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	}
 	if config.AsyncWorkers <= 0 && config.BufferSize > 0 {
 		config.AsyncWorkers = 1
+	}
+	if config.CallerDepth <= 0 {
+		config.CallerDepth = 3
 	}
 
 	config.Filename = strings.TrimSpace(strings.TrimSuffix(config.Filename, ".log"))
@@ -175,19 +211,31 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	}
 
 	logger := &Logger{
-		baseFilename:     logPath,
-		maxBytes:         config.MaxBytes,
-		backupCount:      config.BackupCount,
-		file:             file,
-		timestampFormat:  config.TimestampFormat,
-		outputs:          validOutputs,
-		logsDir:          config.LogsDir,
-		rotateChan:       make(chan struct{}, 1),
-		rotateCloseChan:  make(chan struct{}),
-		enableCaller:     config.EnableCaller,
-		asyncWorkerCount: config.AsyncWorkers,
-		format:           config.Format,
-		formatConfig:     config.FormatConfig,
+		baseFilename:    logPath,
+		maxBytes:        config.MaxBytes,
+		backupCount:     config.BackupCount,
+		file:            file,
+		timestampFormat: config.TimestampFormat,
+		outputs:         validOutputs,
+		logsDir:         config.LogsDir,
+		rotateChan:      make(chan struct{}, 1),
+		rotateCloseChan: make(chan struct{}),
+		enableCaller:    config.EnableCaller,
+		asyncWorkers:    config.AsyncWorkers,
+		format:          config.Format,
+		formatConfig:    config.FormatConfig,
+		errorHandler:    config.ErrorHandler,
+		config:          config,
+	}
+
+	// Initialize fallback writer if enabled
+	if config.EnableFallback {
+		logger.fallbackWriter = os.Stderr
+	}
+
+	// Initialize rate limiter if configured
+	if config.MaxLogRate > 0 {
+		logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
 	}
 
 	logger.level.Store(int32(config.LogLevel))
@@ -196,14 +244,16 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return new(bytes.Buffer)
 	}
 
+	// Start rotation worker
 	logger.wg.Add(1)
 	go logger.rotationWorker()
 
+	// Initialize async logging if configured
 	if config.BufferSize > 0 {
 		logger.asyncQueue = make(chan *logEntry, config.BufferSize)
 		logger.asyncCloseChan = make(chan struct{})
 
-		for i := 0; i < logger.asyncWorkerCount; i++ {
+		for i := 0; i < logger.asyncWorkers; i++ {
 			logger.wg.Add(1)
 			go logger.asyncWorker()
 		}
@@ -212,8 +262,51 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values.
-// It returns a ready-to-use *Logger instance or an error if setup fails.
+// Validate checks the LoggerConfig for valid values
+func (lc *LoggerConfig) Validate() error {
+	if lc.MaxBytes < 0 {
+		return errors.New("MaxBytes cannot be negative")
+	}
+	if lc.BackupCount < 0 {
+		return errors.New("BackupCount cannot be negative")
+	}
+	if lc.BufferSize < 0 {
+		return errors.New("BufferSize cannot be negative")
+	}
+	if lc.AsyncWorkers < 0 {
+		return errors.New("AsyncWorkers cannot be negative")
+	}
+	if lc.MaxLogRate < 0 {
+		return errors.New("MaxLogRate cannot be negative")
+	}
+	if lc.SampleRate < 1 {
+		return errors.New("SampleRate must be at least 1")
+	}
+	if lc.CallerDepth < 1 {
+		return errors.New("CallerDepth must be at least 1")
+	}
+	return nil
+}
+
+// ApplyEnvOverrides applies environment variable overrides to the config
+func (lc *LoggerConfig) ApplyEnvOverrides() {
+	if dir := os.Getenv("LOG_DIR"); dir != "" {
+		lc.LogsDir = dir
+	}
+	if level := os.Getenv("LOG_LEVEL"); level != "" {
+		lc.LogLevelStr = level
+	}
+	if format := os.Getenv("LOG_FORMAT"); format != "" {
+		lc.FormatStr = format
+	}
+	if rate := os.Getenv("LOG_RATE"); rate != "" {
+		if r, err := strconv.Atoi(rate); err == nil {
+			lc.MaxLogRate = r
+		}
+	}
+}
+
+// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
 func NewGourdianLoggerWithDefault() (*Logger, error) {
 	config := DefaultConfig()
 	return NewGourdianLogger(config)
@@ -222,14 +315,22 @@ func NewGourdianLoggerWithDefault() (*Logger, error) {
 func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
 
+	var rotationTicker *time.Ticker
+	if l.config.RotationTime > 0 {
+		rotationTicker = time.NewTicker(l.config.RotationTime)
+		defer rotationTicker.Stop()
+	}
+
 	for {
 		select {
 		case <-l.rotateChan:
 			l.mu.Lock()
 			if err := l.rotateLogFiles(); err != nil {
-				fmt.Fprintf(os.Stderr, "Log rotation failed: %v\n", err)
+				l.handleError(fmt.Errorf("log rotation failed: %w", err))
 			}
 			l.mu.Unlock()
+		case <-rotationTicker.C:
+			l.rotateChan <- struct{}{}
 		case <-l.rotateCloseChan:
 			return
 		}
@@ -242,12 +343,13 @@ func (l *Logger) asyncWorker() {
 	for {
 		select {
 		case entry := <-l.asyncQueue:
-			l.processLogEntry(entry.level, entry.message, entry.callerInfo)
+			l.processLogEntry(entry.level, entry.message, entry.callerInfo, entry.fields)
 		case <-l.asyncCloseChan:
+			// Drain the queue before exiting
 			for {
 				select {
 				case entry := <-l.asyncQueue:
-					l.processLogEntry(entry.level, entry.message, entry.callerInfo)
+					l.processLogEntry(entry.level, entry.message, entry.callerInfo, entry.fields)
 				default:
 					return
 				}
@@ -256,8 +358,26 @@ func (l *Logger) asyncWorker() {
 	}
 }
 
-func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo string) {
-	if level < l.GetLogLevel() {
+func (l *Logger) handleError(err error) {
+	if l.errorHandler != nil {
+		l.errorHandler(err)
+	} else if l.fallbackWriter != nil {
+		fmt.Fprintf(l.fallbackWriter, "LOGGER ERROR: %v\n", err)
+	}
+}
+
+func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo string, fields map[string]interface{}) {
+	currentLevel := l.GetLogLevel()
+	if l.dynamicLevelFn != nil {
+		currentLevel = l.dynamicLevelFn()
+	}
+
+	if level < currentLevel {
+		return
+	}
+
+	// Apply sampling if configured
+	if l.config.SampleRate > 1 && rand.Intn(l.config.SampleRate) != 0 {
 		return
 	}
 
@@ -265,7 +385,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 	buf.Reset()
 	defer l.bufferPool.Put(buf)
 
-	buf.WriteString(l.formatMessage(level, message, callerInfo))
+	buf.WriteString(l.formatMessage(level, message, callerInfo, fields))
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -276,7 +396,10 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 	}
 
 	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
-		fmt.Fprintf(os.Stderr, "Log write error: %v\n", err)
+		l.handleError(fmt.Errorf("log write error: %w", err))
+		if l.fallbackWriter != nil {
+			fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
+		}
 	}
 
 	if level == FATAL {
@@ -284,24 +407,44 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 	}
 }
 
-func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string) string {
+func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	levelStr := fmt.Sprintf("[%s]", level.String())
 	timestampStr := time.Now().Format(l.timestampFormat)
 
-	var callerPart string
+	var builder strings.Builder
+	builder.WriteString(timestampStr)
+	builder.WriteString(" ")
+	builder.WriteString(levelStr)
+	builder.WriteString(" ")
+
 	if callerInfo != "" {
-		callerPart = callerInfo + ":"
+		builder.WriteString(callerInfo)
+		builder.WriteString(":")
 	}
 
-	return fmt.Sprintf("%s %s %s%s\n",
-		timestampStr,
-		levelStr,
-		callerPart,
-		message,
-	)
+	builder.WriteString(message)
+
+	// Add fields if present
+	if len(fields) > 0 {
+		builder.WriteString(" {")
+		first := true
+		for k, v := range fields {
+			if !first {
+				builder.WriteString(", ")
+			}
+			first = false
+			builder.WriteString(k)
+			builder.WriteString("=")
+			builder.WriteString(fmt.Sprintf("%v", v))
+		}
+		builder.WriteString("}")
+	}
+
+	builder.WriteString("\n")
+	return builder.String()
 }
 
-func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) string {
+func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	logEntry := map[string]interface{}{
 		"timestamp": time.Now().Format(l.timestampFormat),
 		"level":     level.String(),
@@ -312,7 +455,13 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) s
 		logEntry["caller"] = callerInfo
 	}
 
+	// Add custom fields from format config
 	for k, v := range l.formatConfig.CustomFields {
+		logEntry[k] = v
+	}
+
+	// Add log-specific fields
+	for k, v := range fields {
 		logEntry[k] = v
 	}
 
@@ -326,13 +475,13 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string) s
 	}
 
 	if err != nil {
-		return fmt.Sprintf(`{"error":"failed to marshal log entry: %v"}`, err)
+		return fmt.Sprintf(`{"error":"failed to marshal log entry: %v"}`+"\n", err)
 	}
 	return string(jsonData) + "\n"
 }
 
-func (l *Logger) getCallerInfo(skip int) string {
-	pc, file, line, ok := runtime.Caller(skip)
+func (l *Logger) getCallerInfo() string {
+	pc, file, line, ok := runtime.Caller(l.config.CallerDepth)
 	if !ok {
 		return ""
 	}
@@ -351,33 +500,49 @@ func (l *Logger) getCallerInfo(skip int) string {
 	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
-func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string) string {
+func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	switch l.format {
 	case FormatJSON:
-		return l.formatJSON(level, message, callerInfo)
+		return l.formatJSON(level, message, callerInfo, fields)
 	default:
-		return l.formatPlain(level, message, callerInfo)
+		return l.formatPlain(level, message, callerInfo, fields)
 	}
 }
 
-func (l *Logger) log(level LogLevel, message string, skip int) {
+func (l *Logger) log(level LogLevel, message string, skip int, fields map[string]interface{}) {
+	// Apply rate limiting if configured
+	if l.rateLimiter != nil && !l.rateLimiter.Allow() {
+		return
+	}
+
 	var callerInfo string
 	if l.enableCaller {
-		callerInfo = l.getCallerInfo(skip)
+		callerInfo = l.getCallerInfo()
 	}
 
 	if l.asyncQueue != nil {
 		select {
-		case l.asyncQueue <- &logEntry{level, message, callerInfo}:
+		case l.asyncQueue <- &logEntry{level, message, callerInfo, fields}:
 		default:
-			l.processLogEntry(level, message, callerInfo)
+			// If queue is full, process synchronously
+			l.processLogEntry(level, message, callerInfo, fields)
 		}
 	} else {
-		l.processLogEntry(level, message, callerInfo)
+		l.processLogEntry(level, message, callerInfo, fields)
 	}
 }
 
 func (l *Logger) rotateLogFiles() error {
+	// Check if rotation is needed by file size
+	fileInfo, err := l.file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	if fileInfo.Size() < l.maxBytes && l.config.RotationTime == 0 {
+		return nil // No need to rotate
+	}
+
 	if err := l.file.Close(); err != nil {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
@@ -390,6 +555,16 @@ func (l *Logger) rotateLogFiles() error {
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
+	// Compress the backup if configured
+	if l.config.CompressBackups {
+		go func() {
+			if err := compressFile(backupPath); err != nil {
+				l.handleError(fmt.Errorf("failed to compress log file: %w", err))
+			}
+		}()
+	}
+
+	// Open new log file
 	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create new log file: %w", err)
@@ -407,15 +582,42 @@ func (l *Logger) rotateLogFiles() error {
 	return nil
 }
 
+func compressFile(path string) error {
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(path + ".gz")
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	gz := gzip.NewWriter(dst)
+	defer gz.Close()
+
+	if _, err := io.Copy(gz, src); err != nil {
+		return err
+	}
+
+	// Remove original file after successful compression
+	return os.Remove(path)
+}
+
 func (l *Logger) cleanupOldBackups() {
-	pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log"
+	pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log*"
 	files, err := filepath.Glob(pattern)
 	if err != nil || len(files) <= l.backupCount {
 		return
 	}
 
+	// Sort files by modification time (oldest first)
 	sort.Slice(files, func(i, j int) bool {
-		return files[i] < files[j] // oldest first
+		info1, _ := os.Stat(files[i])
+		info2, _ := os.Stat(files[j])
+		return info1.ModTime().Before(info2.ModTime())
 	})
 
 	for _, f := range files[:len(files)-l.backupCount] {
@@ -429,6 +631,10 @@ func (l *Logger) SetLogLevel(level LogLevel) {
 
 func (l *Logger) GetLogLevel() LogLevel {
 	return LogLevel(l.level.Load())
+}
+
+func (l *Logger) SetDynamicLevelFunc(fn func() LogLevel) {
+	l.dynamicLevelFn = fn
 }
 
 func (l *Logger) AddOutput(output io.Writer) {
@@ -480,50 +686,112 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
+// Basic log methods
 func (l *Logger) Debug(v ...interface{}) {
-	l.log(DEBUG, fmt.Sprint(v...), 3)
+	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Info(v ...interface{}) {
-	l.log(INFO, fmt.Sprint(v...), 3)
+	l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Warn(v ...interface{}) {
-	l.log(WARN, fmt.Sprint(v...), 3)
+	l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Error(v ...interface{}) {
-	l.log(ERROR, fmt.Sprint(v...), 3)
+	l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Fatal(v ...interface{}) {
-	l.log(FATAL, fmt.Sprint(v...), 3)
+	l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, nil)
 	l.Flush()
 	os.Exit(1)
 }
 
+// Formatted log methods
 func (l *Logger) Debugf(format string, v ...interface{}) {
-	l.log(DEBUG, fmt.Sprintf(format, v...), 3)
+	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Infof(format string, v ...interface{}) {
-	l.log(INFO, fmt.Sprintf(format, v...), 3)
+	l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Warnf(format string, v ...interface{}) {
-	l.log(WARN, fmt.Sprintf(format, v...), 3)
+	l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Errorf(format string, v ...interface{}) {
-	l.log(ERROR, fmt.Sprintf(format, v...), 3)
+	l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
 func (l *Logger) Fatalf(format string, v ...interface{}) {
-	l.log(FATAL, fmt.Sprintf(format, v...), 3)
+	l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 	l.Flush()
 	os.Exit(1)
 }
 
+// Structured logging methods
+func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) {
+	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) {
+	l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) {
+	l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) {
+	l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
+	l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, fields)
+	l.Flush()
+	os.Exit(1)
+}
+
+func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
+	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) {
+	l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
+	l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
+	l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}
+
+func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
+	l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+	l.Flush()
+	os.Exit(1)
+}
+
+// Flush ensures all buffered logs are written
+func (l *Logger) Flush() {
+	if l.asyncQueue != nil {
+		for len(l.asyncQueue) > 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// IsClosed returns whether the logger has been closed
+func (l *Logger) IsClosed() bool {
+	return l.closed.Load()
+}
+
+// WithConfig creates a logger from JSON configuration
 func WithConfig(jsonConfig string) (*Logger, error) {
 	if !json.Valid([]byte(jsonConfig)) {
 		return nil, fmt.Errorf("invalid JSON config")
@@ -555,7 +823,6 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		Alias: (*Alias)(lc),
 	}
 
-	// If the input is just an empty object, use default values
 	if string(data) == "{}" {
 		*lc = DefaultConfig()
 		return nil
@@ -565,7 +832,6 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Set default log level if not specified
 	if aux.LogLevelStr == "" {
 		lc.LogLevel = DEBUG
 	} else {
@@ -576,7 +842,6 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		lc.LogLevel = level
 	}
 
-	// Set default format if not specified
 	if aux.FormatStr == "" {
 		lc.Format = FormatPlain
 	} else {
@@ -591,16 +856,4 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
-}
-
-func (l *Logger) Flush() {
-	if l.asyncQueue != nil {
-		for len(l.asyncQueue) > 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-func (l *Logger) IsClosed() bool {
-	return l.closed.Load()
 }
