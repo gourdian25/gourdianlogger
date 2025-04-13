@@ -365,10 +365,14 @@ func NewGourdianLoggerWithDefault() (*Logger, error) {
 func (l *Logger) rotationWorker() {
 	defer l.wg.Done()
 
-	var rotationTicker *time.Ticker
 	if l.config.RotationTime > 0 {
-		rotationTicker = time.NewTicker(l.config.RotationTime)
-		defer rotationTicker.Stop()
+		ticker := time.NewTicker(l.config.RotationTime)
+		go func() {
+			for range ticker.C {
+				l.rotateChan <- struct{}{}
+			}
+		}()
+		defer ticker.Stop()
 	}
 
 	for {
@@ -379,8 +383,6 @@ func (l *Logger) rotationWorker() {
 				l.handleError(fmt.Errorf("log rotation failed: %w", err))
 			}
 			l.mu.Unlock()
-		case <-rotationTicker.C:
-			l.rotateChan <- struct{}{}
 		case <-l.rotateCloseChan:
 			return
 		}
@@ -903,6 +905,10 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		default:
 			return fmt.Errorf("invalid log format: %s", aux.FormatStr)
 		}
+	}
+
+	if lc.SampleRate < 1 {
+		lc.SampleRate = 1
 	}
 
 	return nil

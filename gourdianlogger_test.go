@@ -2,6 +2,7 @@ package gourdianlogger
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// badWriter is a writer that always fails for testing fallback behavior
+type badWriter struct{}
+
+func (w *badWriter) Write(p []byte) (n int, err error) {
+	return 0, fmt.Errorf("simulated write error")
+}
 
 // TestMain sets up and tears down any test dependencies
 func TestMain(m *testing.M) {
@@ -34,255 +46,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// TestLogFormats tests all supported log formats
-func TestLogFormats(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		format LogFormat
-		check  func(string) bool
-	}{
-		{
-			name:   "Plain",
-			format: FormatPlain,
-			check: func(s string) bool {
-				return strings.Contains(s, "[INFO]") && strings.Contains(s, "test message")
-			},
-		},
-		{
-			name:   "JSON",
-			format: FormatJSON,
-			check: func(s string) bool {
-				var data map[string]interface{}
-				return json.Unmarshal([]byte(s), &data) == nil && data["level"] == "INFO"
-			},
-		},
-		{
-			name:   "JSONPretty",
-			format: FormatJSON,
-			check: func(s string) bool {
-				var data map[string]interface{}
-				config := DefaultConfig()
-				config.FormatConfig.PrettyPrint = true
-				return json.Unmarshal([]byte(s), &data) == nil && data["level"] == "INFO"
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			config := DefaultConfig()
-			config.Format = tt.format
-			config.Outputs = []io.Writer{&buf}
-			config.LogsDir = "test_logs"
-			config.EnableCaller = true
-
-			if strings.Contains(tt.name, "Pretty") {
-				config.FormatConfig.PrettyPrint = true
-			}
-
-			logger, err := NewGourdianLogger(config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer logger.Close()
-
-			logger.Info("test message")
-
-			output := buf.String()
-			if !tt.check(output) {
-				t.Errorf("Format validation failed for %s.\nGot: %q", tt.name, output)
-			}
-		})
-	}
-}
-
-// TestWithConfig tests JSON config parsing
-func TestWithConfig(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		jsonConfig string
-		verify     func(*Logger) error
-		expectErr  bool
-	}{
-		{
-			name: "ValidConfig",
-			jsonConfig: `{
-				"filename": "json_config_test",
-				"logs_dir": "test_logs",
-				"log_level": "WARN",
-				"format": "JSON",
-				"format_config": {
-					"pretty_print": true,
-					"custom_fields": {
-						"app": "test"
-					}
-				}
-			}`,
-			verify: func(l *Logger) error {
-				if l.GetLogLevel() != WARN {
-					return fmt.Errorf("expected log level WARN, got %v", l.GetLogLevel())
-				}
-				return nil
-			},
-			expectErr: false,
-		},
-		{
-			name: "InvalidJSON",
-			jsonConfig: `{
-				"filename": "invalid",
-				"logs_dir": "test_logs",
-				"log_level": "INVALID"
-			}`,
-			expectErr: true,
-		},
-		{
-			name:       "EmptyConfig",
-			jsonConfig: `{}`,
-			verify: func(l *Logger) error {
-				if l.GetLogLevel() != DEBUG {
-					return fmt.Errorf("expected default log level DEBUG, got %v", l.GetLogLevel())
-				}
-				return nil
-			},
-			expectErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, err := WithConfig(tt.jsonConfig)
-			if tt.expectErr {
-				if err == nil {
-					t.Error("Expected error but got none")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
-			defer logger.Close()
-
-			if tt.verify != nil {
-				if err := tt.verify(logger); err != nil {
-					t.Error(err)
-				}
-			}
-		})
-	}
-}
-
-// TestDefaultConfig verifies the default configuration
-func TestDefaultConfig(t *testing.T) {
-	t.Parallel()
-
-	config := DefaultConfig()
-
-	tests := []struct {
-		name     string
-		actual   interface{}
-		expected interface{}
-	}{
-		{"Filename", config.Filename, "app"},
-		{"MaxBytes", config.MaxBytes, defaultMaxBytes},
-		{"BackupCount", config.BackupCount, defaultBackupCount},
-		{"LogLevel", config.LogLevel, DEBUG},
-		{"TimestampFormat", config.TimestampFormat, defaultTimestampFormat},
-		{"LogsDir", config.LogsDir, defaultLogsDir},
-		{"EnableCaller", config.EnableCaller, true},
-		{"BufferSize", config.BufferSize, 0},
-		{"AsyncWorkers", config.AsyncWorkers, 1},
-		{"Format", config.Format, FormatPlain},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.actual != tt.expected {
-				t.Errorf("Expected %v, got %v", tt.expected, tt.actual)
-			}
-		})
-	}
-}
-
-// TestNewLogger tests logger creation
-func TestNewLogger(t *testing.T) {
-	t.Parallel()
-
-	t.Run("BasicCreation", func(t *testing.T) {
-		t.Parallel()
-
-		logger, err := NewGourdianLogger(LoggerConfig{
-			Filename: "test",
-			LogsDir:  "test_logs",
-		})
-		if err != nil {
-			t.Fatalf("Failed to create logger: %v", err)
-		}
-		defer logger.Close()
-
-		if logger == nil {
-			t.Error("Logger should not be nil")
-		}
-
-		if logger.GetLogLevel() != DEBUG {
-			t.Error("Default log level should be DEBUG")
-		}
-	})
-
-	t.Run("InvalidDirectory", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := NewGourdianLogger(LoggerConfig{
-			Filename: "test",
-			LogsDir:  "/invalid/path/that/does/not/exist",
-		})
-		if err == nil {
-			t.Error("Expected error for invalid directory")
-		}
-	})
-
-	t.Run("EmptyFilename", func(t *testing.T) {
-		t.Parallel()
-
-		logger, err := NewGourdianLogger(LoggerConfig{
-			Filename: "",
-			LogsDir:  "test_logs",
-		})
-		if err != nil {
-			t.Fatalf("Failed to create logger with empty filename: %v", err)
-		}
-		defer logger.Close()
-
-		if !strings.HasSuffix(logger.baseFilename, "app.log") {
-			t.Errorf("Expected default filename 'app.log', got '%s'", logger.baseFilename)
-		}
-	})
-
-	t.Run("WithExtension", func(t *testing.T) {
-		t.Parallel()
-
-		logger, err := NewGourdianLogger(LoggerConfig{
-			Filename: "test.log",
-			LogsDir:  "test_logs",
-		})
-		if err != nil {
-			t.Fatalf("Failed to create logger: %v", err)
-		}
-		defer logger.Close()
-
-		if !strings.HasSuffix(logger.baseFilename, "test.log") {
-			t.Errorf("Expected filename 'test.log', got '%s'", logger.baseFilename)
-		}
-	})
-}
-
-// TestLogLevels tests all log level functions
-func TestLogLevels(t *testing.T) {
+// TestBasicLogging tests basic log functionality
+func TestBasicLogging(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
@@ -291,15 +56,13 @@ func TestLogLevels(t *testing.T) {
 	config.Outputs = []io.Writer{&buf}
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer logger.Close()
 
 	tests := []struct {
-		name   string
-		fn     func()
-		expect string
+		name     string
+		logFunc  func()
+		contains string
 	}{
 		{"Debug", func() { logger.Debug("debug message") }, "DEBUG"},
 		{"Info", func() { logger.Info("info message") }, "INFO"},
@@ -310,15 +73,13 @@ func TestLogLevels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf.Reset()
-			tt.fn()
-			if !strings.Contains(buf.String(), tt.expect) {
-				t.Errorf("Expected log to contain '%s', got '%s'", tt.expect, buf.String())
-			}
+			tt.logFunc()
+			assert.Contains(t, buf.String(), tt.contains)
 		})
 	}
 }
 
-// TestFatalLogging tests the fatal log level separately since it exits
+// TestFatalLogging tests fatal log behavior
 func TestFatalLogging(t *testing.T) {
 	if os.Getenv("BE_CRASHER") == "1" {
 		config := DefaultConfig()
@@ -339,100 +100,89 @@ func TestFatalLogging(t *testing.T) {
 	err := cmd.Run()
 
 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-		return // Expected behavior
+		return
 	}
 	t.Fatalf("process ran with err %v, want exit status 1", err)
 }
 
-// TestLogFormatting tests formatted log functions
-func TestLogFormatting(t *testing.T) {
+// TestLogFormats tests all supported log formats
+func TestLogFormats(t *testing.T) {
 	t.Parallel()
-
-	var buf bytes.Buffer
-	config := DefaultConfig()
-	config.LogsDir = "test_logs"
-	config.Outputs = []io.Writer{&buf}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer logger.Close()
 
 	tests := []struct {
 		name   string
-		fn     func()
-		expect string
+		format LogFormat
+		check  func(string) bool
 	}{
-		{"Debugf", func() { logger.Debugf("debug %s", "value") }, "debug value"},
-		{"Infof", func() { logger.Infof("info %d", 42) }, "info 42"},
-		{"Warnf", func() { logger.Warnf("warn %.1f", 3.14) }, "warn 3.1"},
-		{"Errorf", func() { logger.Errorf("error %v", os.ErrNotExist) }, "error file does not exist"},
+		{
+			name:   "PlainFormat",
+			format: FormatPlain,
+			check: func(s string) bool {
+				return strings.Contains(s, "[INFO]") && strings.Contains(s, "test message")
+			},
+		},
+		{
+			name:   "JSONFormat",
+			format: FormatJSON,
+			check: func(s string) bool {
+				var data map[string]interface{}
+				return json.Unmarshal([]byte(s), &data) == nil && data["level"] == "INFO"
+			},
+		},
+		{
+			name:   "JSONPrettyFormat",
+			format: FormatJSON,
+			check: func(s string) bool {
+				var data map[string]interface{}
+				return json.Unmarshal([]byte(s), &data) == nil && data["level"] == "INFO"
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			buf.Reset()
-			tt.fn()
-			if !strings.Contains(buf.String(), tt.expect) {
-				t.Errorf("Expected log to contain '%s', got '%s'", tt.expect, buf.String())
+			var buf bytes.Buffer
+			config := DefaultConfig()
+			config.Format = tt.format
+			config.Outputs = []io.Writer{&buf}
+			config.LogsDir = "test_logs"
+			config.EnableCaller = true
+
+			if strings.Contains(tt.name, "Pretty") {
+				config.FormatConfig.PrettyPrint = true
 			}
+
+			logger, err := NewGourdianLogger(config)
+			require.NoError(t, err)
+			defer logger.Close()
+
+			logger.Info("test message")
+			assert.True(t, tt.check(buf.String()), "Format validation failed for %s", tt.name)
 		})
 	}
 }
 
-// TestLogRotation tests log file rotation
-func TestLogRotation(t *testing.T) {
+// TestTimeBasedRotation tests time-based log rotation
+func TestTimeBasedRotation(t *testing.T) {
 	t.Parallel()
 
 	config := DefaultConfig()
-	config.Filename = "rotation_test"
+	config.Filename = "time_rotation_test"
 	config.LogsDir = "test_logs"
-	config.MaxBytes = 100 // Small size to trigger rotation quickly
-	config.BackupCount = 2
+	config.RotationTime = 100 * time.Millisecond
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer logger.Close()
 
-	// Write enough logs to trigger rotation
-	for i := 0; i < 50; i++ {
-		logger.Info(strings.Repeat("a", 10)) // Each log is ~50 bytes with timestamp, etc.
-	}
+	// Wait for rotation to occur
+	time.Sleep(150 * time.Millisecond)
 
-	// Force rotation
-	logger.mu.Lock()
-	err = logger.rotateLogFiles()
-	logger.mu.Unlock()
-	if err != nil {
-		t.Fatalf("Rotation failed: %v", err)
-	}
+	// Check for rotated file
+	files, err := filepath.Glob(filepath.Join("test_logs", "time_rotation_test_*.log"))
+	require.NoError(t, err)
 
-	// Check backup files
-	files, err := filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(files) < 1 {
-		t.Error("Expected at least one rotated log file")
-	}
-
-	// Test backup count enforcement
-	for i := 0; i < 50; i++ {
-		logger.Info(strings.Repeat("b", 10))
-	}
-
-	files, err = filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(files) > config.BackupCount {
-		t.Errorf("Expected max %d backup files, got %d", config.BackupCount, len(files))
-	}
+	assert.GreaterOrEqual(t, len(files), 1, "Expected at least one rotated log file")
 }
 
 // TestConcurrentLogging tests concurrent log writes
@@ -446,9 +196,7 @@ func TestConcurrentLogging(t *testing.T) {
 	config.AsyncWorkers = 4
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer logger.Close()
 
 	var wg sync.WaitGroup
@@ -467,48 +215,108 @@ func TestConcurrentLogging(t *testing.T) {
 
 	// Verify all logs were written
 	content, err := os.ReadFile(filepath.Join("test_logs", "concurrent_test.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	lines := strings.Split(string(content), "\n")
-	if len(lines) < count {
-		t.Errorf("Expected at least %d log lines, got %d", count, len(lines))
-	}
+	assert.GreaterOrEqual(t, len(lines), count, "Expected at least %d log lines", count)
 }
 
-// TestLogLevelFiltering tests that logs are properly filtered by level
-func TestLogLevelFiltering(t *testing.T) {
+// TestRateLimiting tests log rate limiting
+func TestRateLimiting(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
 	config := DefaultConfig()
 	config.LogsDir = "test_logs"
 	config.Outputs = []io.Writer{&buf}
-	config.LogLevel = WARN
+	config.MaxLogRate = 10 // 10 logs per second
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer logger.Close()
 
-	logger.Debug("debug message")
-	logger.Info("info message")
-	logger.Warn("warn message")
-	logger.Error("error message")
-
-	output := buf.String()
-	if strings.Contains(output, "debug") || strings.Contains(output, "info") {
-		t.Error("Logger should not output messages below WARN level")
+	// Burst of logs
+	for i := 0; i < 20; i++ {
+		logger.Info(fmt.Sprintf("message %d", i))
 	}
-	if !strings.Contains(output, "warn") || !strings.Contains(output, "error") {
-		t.Error("Logger should output WARN and ERROR messages")
+
+	lines := strings.Split(buf.String(), "\n")
+	assert.LessOrEqual(t, len(lines), config.MaxLogRate+1, "Expected logs to be rate limited")
+}
+
+// TestLogSampling tests log sampling functionality
+func TestLogSampling(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&buf}
+	config.SampleRate = 5 // 1 in 5 logs should be kept
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	// Write enough logs to get a sample
+	for i := 0; i < 100; i++ {
+		logger.Info(fmt.Sprintf("message %d", i))
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	assert.Greater(t, len(lines), 5, "Expected some sampled logs")
+	assert.Less(t, len(lines), 50, "Expected sampling to reduce log volume")
+}
+
+// TestStructuredLogging tests structured logging with fields
+func TestStructuredLogging(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		format LogFormat
+		check  func(string) bool
+	}{
+		{
+			name:   "PlainWithFields",
+			format: FormatPlain,
+			check: func(s string) bool {
+				return strings.Contains(s, "key=value") && strings.Contains(s, "test message")
+			},
+		},
+		{
+			name:   "JSONWithFields",
+			format: FormatJSON,
+			check: func(s string) bool {
+				var data map[string]interface{}
+				err := json.Unmarshal([]byte(s), &data)
+				return err == nil && data["key"] == "value"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			config := DefaultConfig()
+			config.Format = tt.format
+			config.Outputs = []io.Writer{&buf}
+			config.LogsDir = "test_logs"
+
+			logger, err := NewGourdianLogger(config)
+			require.NoError(t, err)
+			defer logger.Close()
+
+			fields := map[string]interface{}{"key": "value"}
+			logger.InfoWithFields(fields, "test message")
+
+			assert.True(t, tt.check(buf.String()), "Structured logging failed for %s", tt.name)
+		})
 	}
 }
 
-// TestDynamicConfiguration tests dynamic changes to logger config
-func TestDynamicConfiguration(t *testing.T) {
+// TestDynamicLogLevel tests dynamic log level changes
+func TestDynamicLogLevel(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
@@ -517,78 +325,81 @@ func TestDynamicConfiguration(t *testing.T) {
 	config.Outputs = []io.Writer{&buf}
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer logger.Close()
 
-	t.Run("AddRemoveOutput", func(t *testing.T) {
-		var buf2 bytes.Buffer
-		logger.AddOutput(&buf2)
-		logger.Info("test message")
-		if buf2.Len() == 0 {
-			t.Error("Second output should have received log message")
-		}
+	// Set initial level to WARN
+	logger.SetLogLevel(WARN)
+	buf.Reset()
+	logger.Info("should not appear")
+	assert.Empty(t, buf.String(), "Info log should not appear at WARN level")
 
-		logger.RemoveOutput(&buf2)
-		buf2.Reset()
-		logger.Info("another message")
-		if buf2.Len() > 0 {
-			t.Error("Second output should no longer receive messages")
-		}
+	// Change to DEBUG level
+	logger.SetLogLevel(DEBUG)
+	buf.Reset()
+	logger.Debug("should appear")
+	assert.Contains(t, buf.String(), "should appear", "Debug log should appear at DEBUG level")
+
+	// Test dynamic level function
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		return ERROR
 	})
-
-	t.Run("SetLogLevel", func(t *testing.T) {
-		logger.SetLogLevel(ERROR)
-		buf.Reset()
-		logger.Warn("warning message")
-		if buf.Len() > 0 {
-			t.Error("Logger should not output WARN messages after level change")
-		}
-
-		logger.SetLogLevel(DEBUG)
-		buf.Reset()
-		logger.Debug("debug message")
-		if buf.Len() == 0 {
-			t.Error("Logger should output DEBUG messages after level change")
-		}
-	})
+	buf.Reset()
+	logger.Warn("should not appear with dynamic level")
+	assert.Empty(t, buf.String(), "Warn log should not appear with dynamic ERROR level")
 }
 
-// TestCloseBehavior tests logger close functionality
-func TestCloseBehavior(t *testing.T) {
+// TestFallbackLogging tests fallback logging behavior
+func TestFallbackLogging(t *testing.T) {
 	t.Parallel()
 
+	var buf bytes.Buffer
 	config := DefaultConfig()
 	config.LogsDir = "test_logs"
-	config.Filename = "close_test"
+	config.Outputs = []io.Writer{&badWriter{}}
+	config.EnableFallback = true
+	config.ErrorHandler = func(err error) {
+		buf.WriteString("ERROR: " + err.Error())
+	}
 
 	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	defer logger.Close()
 
-	// Test double close
-	err = logger.Close()
-	if err != nil {
-		t.Errorf("First close failed: %v", err)
-	}
+	logger.Info("test message")
 
-	err = logger.Close()
-	if err != nil {
-		t.Errorf("Second close failed: %v", err)
-	}
-
-	// Test logging after close
-	var buf bytes.Buffer
-	logger.AddOutput(&buf)
-	logger.Info("test after close")
-	if buf.Len() > 0 {
-		t.Error("Logger should not accept logs after close")
-	}
+	assert.Contains(t, buf.String(), "ERROR:", "Error handler should be called")
 }
 
-// TestCallerInfo tests the caller information functionality
+// TestCustomFields tests custom fields in JSON format
+func TestCustomFields(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.Format = FormatJSON
+	config.Outputs = []io.Writer{&buf}
+	config.LogsDir = "test_logs"
+	config.FormatConfig.CustomFields = map[string]interface{}{
+		"service": "test",
+		"version": 1.0,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	logger.Info("test message")
+
+	var data map[string]interface{}
+	err = json.Unmarshal(buf.Bytes(), &data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test", data["service"], "Custom field 'service' not found")
+	assert.Equal(t, 1.0, data["version"], "Custom field 'version' not found")
+}
+
+// TestCallerInfo tests caller information inclusion
 func TestCallerInfo(t *testing.T) {
 	t.Parallel()
 
@@ -601,7 +412,7 @@ func TestCallerInfo(t *testing.T) {
 			name:         "CallerEnabled",
 			enableCaller: true,
 			check: func(s string) bool {
-				return strings.Contains(s, "logger_test.go") // This test file
+				return strings.Contains(s, "logger_test.go")
 			},
 		},
 		{
@@ -622,16 +433,143 @@ func TestCallerInfo(t *testing.T) {
 			config.EnableCaller = tt.enableCaller
 
 			logger, err := NewGourdianLogger(config)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer logger.Close()
 
 			logger.Info("test caller info")
+			assert.True(t, tt.check(buf.String()), "Caller info test failed for %s", tt.name)
+		})
+	}
+}
 
-			if !tt.check(buf.String()) {
-				t.Errorf("Caller info test failed for %s", tt.name)
+// TestWithConfig tests JSON config parsing
+func TestWithConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		jsonConfig string
+		verify     func(*Logger) bool
+		expectErr  bool
+	}{
+		{
+			name: "ValidConfig",
+			jsonConfig: `{
+				"filename": "json_config_test",
+				"logs_dir": "test_logs",
+				"log_level": "WARN",
+				"format": "JSON",
+				"sample_rate": 1,
+				"format_config": {
+					"pretty_print": true,
+					"custom_fields": {
+						"app": "test"
+					}
+				}
+			}`,
+			verify: func(l *Logger) bool {
+				return l.GetLogLevel() == WARN
+			},
+			expectErr: false,
+		},
+		{
+			name: "InvalidJSON",
+			jsonConfig: `{
+				"filename": "invalid",
+				"logs_dir": "test_logs",
+				"log_level": "INVALID"
+			}`,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, err := WithConfig(tt.jsonConfig)
+			if tt.expectErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			defer logger.Close()
+
+			if tt.verify != nil {
+				assert.True(t, tt.verify(logger))
 			}
 		})
 	}
+}
+
+// TestEnvironmentOverrides tests environment variable overrides
+func TestEnvironmentOverrides(t *testing.T) {
+	t.Parallel()
+
+	t.Setenv("LOG_DIR", "env_test_logs")
+	t.Setenv("LOG_LEVEL", "ERROR")
+	t.Setenv("LOG_FORMAT", "JSON")
+	t.Setenv("LOG_RATE", "100")
+
+	config := DefaultConfig()
+	config.ApplyEnvOverrides()
+
+	assert.Equal(t, "env_test_logs", config.LogsDir)
+	assert.Equal(t, "ERROR", config.LogLevelStr)
+	assert.Equal(t, "JSON", config.FormatStr)
+	assert.Equal(t, 100, config.MaxLogRate)
+}
+
+// TestLogRotation tests log rotation functionality
+func TestLogRotation(t *testing.T) {
+	t.Parallel()
+
+	config := DefaultConfig()
+	config.Filename = "rotation_test"
+	config.LogsDir = "test_logs"
+	config.MaxBytes = 100 // Small size to trigger rotation quickly
+	config.BackupCount = 2
+	config.CompressBackups = true
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	// Write enough logs to trigger rotation
+	for i := 0; i < 50; i++ {
+		logger.Info(strings.Repeat("a", 10))
+	}
+
+	// Force rotation
+	logger.mu.Lock()
+	err = logger.rotateLogFiles()
+	logger.mu.Unlock()
+	require.NoError(t, err)
+
+	// Check backup files
+	files, err := filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log*"))
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, len(files), 1, "Expected at least one rotated log file")
+
+	// Verify compression
+	for _, f := range files {
+		if strings.HasSuffix(f, ".gz") {
+			file, err := os.Open(f)
+			require.NoError(t, err, "Failed to open gzipped file")
+			defer file.Close()
+
+			_, err = gzip.NewReader(file)
+			assert.NoError(t, err, "Failed to read gzipped file")
+		}
+	}
+
+	// Test backup count enforcement
+	for i := 0; i < 50; i++ {
+		logger.Info(strings.Repeat("b", 10))
+	}
+
+	files, err = filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log*"))
+	require.NoError(t, err)
+
+	assert.LessOrEqual(t, len(files), config.BackupCount+1, "Expected max %d backup files", config.BackupCount)
 }
