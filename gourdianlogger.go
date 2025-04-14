@@ -907,6 +907,10 @@ func (lc *LoggerConfig) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	// Set defaults for required fields if not provided
+	if lc.CallerDepth == 0 {
+		lc.CallerDepth = 3 // Default value
+	}
 	if lc.SampleRate < 1 {
 		lc.SampleRate = 1
 	}

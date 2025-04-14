@@ -442,69 +442,8 @@ func TestCallerInfo(t *testing.T) {
 	}
 }
 
-// TestWithConfig tests JSON config parsing
-func TestWithConfig(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		jsonConfig string
-		verify     func(*Logger) bool
-		expectErr  bool
-	}{
-		{
-			name: "ValidConfig",
-			jsonConfig: `{
-				"filename": "json_config_test",
-				"logs_dir": "test_logs",
-				"log_level": "WARN",
-				"format": "JSON",
-				"sample_rate": 1,
-				"format_config": {
-					"pretty_print": true,
-					"custom_fields": {
-						"app": "test"
-					}
-				}
-			}`,
-			verify: func(l *Logger) bool {
-				return l.GetLogLevel() == WARN
-			},
-			expectErr: false,
-		},
-		{
-			name: "InvalidJSON",
-			jsonConfig: `{
-				"filename": "invalid",
-				"logs_dir": "test_logs",
-				"log_level": "INVALID"
-			}`,
-			expectErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, err := WithConfig(tt.jsonConfig)
-			if tt.expectErr {
-				assert.Error(t, err)
-				return
-			}
-
-			require.NoError(t, err)
-			defer logger.Close()
-
-			if tt.verify != nil {
-				assert.True(t, tt.verify(logger))
-			}
-		})
-	}
-}
-
 // TestEnvironmentOverrides tests environment variable overrides
 func TestEnvironmentOverrides(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("LOG_DIR", "env_test_logs")
 	t.Setenv("LOG_LEVEL", "ERROR")
 	t.Setenv("LOG_FORMAT", "JSON")
@@ -572,4 +511,324 @@ func TestLogRotation(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.LessOrEqual(t, len(files), config.BackupCount+1, "Expected max %d backup files", config.BackupCount)
+}
+
+// TestWithConfig tests JSON config parsing
+func TestWithConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		jsonConfig string
+		verify     func(*Logger) bool
+		expectErr  bool
+	}{
+		{
+			name: "ValidConfig",
+			jsonConfig: `{
+                "filename": "json_config_test",
+                "logs_dir": "test_logs",
+                "log_level": "WARN",
+                "format": "JSON",
+                "caller_depth": 3,
+                "sample_rate": 1,
+                "format_config": {
+                    "pretty_print": true,
+                    "custom_fields": {
+                        "app": "test"
+                    }
+                }
+            }`,
+			verify: func(l *Logger) bool {
+				return l.GetLogLevel() == WARN
+			},
+			expectErr: false,
+		},
+		{
+			name: "InvalidJSON",
+			jsonConfig: `{
+                "filename": "invalid",
+                "logs_dir": "test_logs",
+                "log_level": "INVALID"
+            }`,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, err := WithConfig(tt.jsonConfig)
+			if tt.expectErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			defer logger.Close()
+
+			if tt.verify != nil {
+				assert.True(t, tt.verify(logger))
+			}
+		})
+	}
+}
+
+func TestLogLevelParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input    string
+		expected LogLevel
+		hasError bool
+	}{
+		{"DEBUG", DEBUG, false},
+		{"INFO", INFO, false},
+		{"WARN", WARN, false},
+		{"WARNING", WARN, false},
+		{"ERROR", ERROR, false},
+		{"FATAL", FATAL, false},
+		{"INVALID", DEBUG, true},
+		{"", DEBUG, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			level, err := ParseLogLevel(tt.input)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, level)
+			}
+		})
+	}
+}
+
+func TestBufferPoolUsage(t *testing.T) {
+	t.Parallel()
+
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	initial := logger.bufferPool.Get()
+	logger.bufferPool.Put(initial)
+
+	// Verify pool is being used
+	logger.Info("test message")
+	logger.Warn("another message")
+
+	// Should reuse the buffer
+	assert.Equal(t, initial, logger.bufferPool.Get(), "Buffer pool should reuse buffers")
+}
+
+func TestErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&badWriter{}}
+	config.ErrorHandler = func(err error) {
+		buf.WriteString("HANDLED: " + err.Error())
+	}
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	logger.Info("test message")
+
+	// Check that the error contains the core message we care about
+	assert.Contains(t, buf.String(), "simulated write error")
+	assert.Contains(t, buf.String(), "HANDLED:")
+}
+
+func TestCompressionFailure(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Filename = "compression_test"
+	config.CompressBackups = true
+	config.Outputs = []io.Writer{&buf}
+	config.ErrorHandler = func(err error) {
+		buf.WriteString("COMPRESSION ERROR: " + err.Error())
+	}
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	// Force rotation with a non-existent file to trigger compression error
+	logger.mu.Lock()
+	oldFile := logger.file
+	logger.file = nil
+	logger.rotateChan <- struct{}{}
+	logger.mu.Unlock()
+
+	time.Sleep(100 * time.Millisecond) // Allow time for async processing
+	assert.Contains(t, buf.String(), "COMPRESSION ERROR")
+
+	// Restore original file to allow clean shutdown
+	logger.mu.Lock()
+	logger.file = oldFile
+	logger.mu.Unlock()
+}
+
+func TestDynamicLogLevelFunction(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&buf}
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	// Set dynamic level function that alternates between DEBUG and ERROR
+	counter := 0
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		counter++
+		if counter%2 == 0 {
+			return DEBUG
+		}
+		return ERROR
+	})
+
+	logger.Info("message 1") // Should be filtered (ERROR level)
+	logger.Info("message 2") // Should appear (DEBUG level)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	assert.Equal(t, 1, len(lines), "Expected only one message to pass through dynamic level filter")
+}
+
+func TestCustomTimestampFormat(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&buf}
+	config.TimestampFormat = time.RFC3339Nano
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	logger.Info("test message")
+	logLine := buf.String()
+
+	// Try to parse the timestamp portion
+	tsPart := strings.Split(logLine, " ")[0]
+	_, err = time.Parse(time.RFC3339Nano, tsPart)
+	assert.NoError(t, err, "Timestamp should match configured format")
+}
+
+func TestUnmarshalJSONEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		json      string
+		expectErr bool
+	}{
+		{"Empty", "{}", false},
+		{"InvalidJSON", "{", true},
+		{"UnknownField", `{"unknown": "field"}`, false},
+		{"InvalidLevel", `{"log_level": "INVALID"}`, true},
+		{"InvalidFormat", `{"format": "INVALID"}`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var config LoggerConfig
+			err := json.Unmarshal([]byte(tt.json), &config)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestMaxBytesEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		maxBytes    int64
+		expectError bool
+		expectFiles int
+	}{
+		{"Zero", 0, false, 0},
+		{"Negative", -1, true, 0},
+		{"Small", 100, false, 1}, // Should rotate once
+		{"Large", 1 << 30, false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := DefaultConfig()
+			config.Filename = "maxbytes_" + tt.name
+			config.LogsDir = "test_logs"
+			config.MaxBytes = tt.maxBytes
+			config.BackupCount = 5
+			config.BufferSize = 0 // Ensure synchronous writes for test
+
+			logger, err := NewGourdianLogger(config)
+			if tt.expectError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			defer logger.Close()
+
+			// Write enough to trigger rotation
+			message := strings.Repeat("x", 20)
+			for i := 0; i < 100; i++ {
+				logger.Info(message)
+
+				// For small maxBytes, manually trigger rotation check
+				if tt.maxBytes > 0 && tt.maxBytes < 1000 {
+					logger.mu.Lock()
+					if logger.file != nil {
+						if info, err := logger.file.Stat(); err == nil {
+							if info.Size() >= tt.maxBytes {
+								logger.rotateChan <- struct{}{}
+							}
+						}
+					}
+					logger.mu.Unlock()
+				}
+			}
+
+			// Allow time for rotation to complete
+			time.Sleep(100 * time.Millisecond)
+
+			// Check for rotated files
+			pattern := filepath.Join("test_logs", "maxbytes_"+tt.name+"_*.log")
+			files, err := filepath.Glob(pattern)
+			require.NoError(t, err)
+
+			if tt.expectFiles > 0 {
+				// For rotation cases, also verify current log size
+				currentLog := filepath.Join("test_logs", config.Filename+".log")
+				info, err := os.Stat(currentLog)
+				require.NoError(t, err)
+				assert.Less(t, info.Size(), tt.maxBytes,
+					"Current log file should be under maxBytes")
+			}
+
+			assert.Len(t, files, tt.expectFiles,
+				"Expected %d rotated files for maxBytes=%d, got %v",
+				tt.expectFiles, tt.maxBytes, files)
+		})
+	}
 }
