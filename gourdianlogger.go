@@ -20,7 +20,20 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// LogLevel represents the severity level of log messages
+// LogLevel represents the severity levels for log messages in increasing order of severity.
+// The logger will only output messages at or above the currently set log level.
+//
+// Levels:
+//
+//	DEBUG - Detailed debug information (most verbose)
+//	INFO  - General operational messages about application flow
+//	WARN  - Potentially harmful situations that aren't errors
+//	ERROR - Error events that might still allow the application to continue
+//	FATAL - Severe errors that will prevent the application from continuing (will call os.Exit(1))
+//
+// Example:
+//
+//	logger.SetLogLevel(gourdianlogger.INFO) // Will log INFO, WARN, ERROR, FATAL
 type LogLevel int32
 
 const (
@@ -31,12 +44,22 @@ const (
 	FATAL
 )
 
-// LogFormat represents the format of log messages
+// LogFormat specifies the output format for log messages.
+//
+// Supported formats:
+//
+//	FormatPlain - Human-readable text format with timestamp, level, message
+//	FormatJSON  - Structured JSON format with additional metadata
+//
+// Example:
+//
+//	config := DefaultConfig()
+//	config.Format = gourdianlogger.FormatJSON
 type LogFormat int
 
 const (
-	FormatPlain LogFormat = iota // Default plain text format
-	FormatJSON                   // JSON format
+	FormatPlain LogFormat = iota
+	FormatJSON
 )
 
 var (
@@ -46,7 +69,40 @@ var (
 	defaultLogsDir         string = "logs"
 )
 
-// LoggerConfig holds configuration for the logger
+// LoggerConfig contains all configurable parameters for the logger.
+// Used when creating a new logger instance via NewGourdianLogger().
+//
+// Fields:
+//
+//	Filename        - Base name for log files (without extension)
+//	MaxBytes        - Maximum log file size in bytes before rotation (default 10MB)
+//	BackupCount     - Number of rotated log files to keep (default 5)
+//	LogLevel        - Minimum log level to output (default DEBUG)
+//	TimestampFormat - Custom timestamp format (default "2006-01-02 15:04:05.000000")
+//	LogsDir         - Directory to store log files (default "logs")
+//	EnableCaller    - Whether to include caller information (file:line:function)
+//	BufferSize      - Size of async buffer (0 for synchronous logging)
+//	AsyncWorkers    - Number of async worker goroutines (default 1)
+//	Format          - Output format (plain or JSON)
+//	FormatConfig    - Format-specific configuration
+//	EnableFallback  - Whether to use stderr fallback on write errors
+//	MaxLogRate      - Maximum logs per second (0 for unlimited)
+//	CompressBackups - Whether to gzip rotated log files
+//	RotationTime    - Time-based rotation interval (0 to disable)
+//	SampleRate      - Log sampling rate (1 logs every N messages)
+//	CallerDepth     - Number of stack frames to skip for caller info
+//
+// Example:
+//
+//	config := LoggerConfig{
+//	    Filename: "myapp",
+//	    MaxBytes: 50 * 1024 * 1024, // 50MB
+//	    LogLevel: gourdianlogger.INFO,
+//	    Format: gourdianlogger.FormatJSON,
+//	    FormatConfig: FormatConfig{
+//	        PrettyPrint: true,
+//	    },
+//	}
 type LoggerConfig struct {
 	Filename        string        `json:"filename"`         // Base filename for logs
 	MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
@@ -71,13 +127,35 @@ type LoggerConfig struct {
 	ErrorHandler    func(error)   `json:"-"`                // Custom error handler
 }
 
-// FormatConfig contains format-specific configuration
+// FormatConfig contains additional formatting options.
+//
+// Fields:
+//
+//	PrettyPrint  - Whether to pretty-print JSON output with indentation
+//	CustomFields - Additional key-value pairs to include in every log message
+//
+// Example:
+//
+//	FormatConfig{
+//	    PrettyPrint: true,
+//	    CustomFields: map[string]interface{}{
+//	        "app": "myapp",
+//	        "env": "production",
+//	    },
+//	}
 type FormatConfig struct {
 	PrettyPrint  bool                   `json:"pretty_print"`  // For human-readable JSON
 	CustomFields map[string]interface{} `json:"custom_fields"` // Custom fields to include
 }
 
-// Logger is the main logging struct
+// Logger is the main logging instance that provides thread-safe logging capabilities.
+// It supports both synchronous and asynchronous logging, log rotation,
+// multiple output destinations, and structured logging.
+//
+// Create an instance using:
+//   - NewGourdianLogger()
+//   - NewGourdianLoggerWithDefault()
+//   - WithConfig()
 type Logger struct {
 	fileMu       sync.Mutex   // Protects file operations
 	bufferPoolMu sync.Mutex   // Protects buffer pool access
@@ -121,6 +199,24 @@ func (l LogLevel) String() string {
 	return [...]string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"}[l]
 }
 
+// ParseLogLevel converts a string representation to a LogLevel.
+// Case-insensitive. Supports both full names and abbreviations.
+//
+// Parameters:
+//
+//	level: String representation ("DEBUG", "INFO", "WARN", "ERROR", "FATAL")
+//
+// Returns:
+//
+//	LogLevel: Corresponding log level constant
+//	error:    If the string doesn't match any level
+//
+// Example:
+//
+//	level, err := ParseLogLevel("info")
+//	if err != nil {
+//	    return fmt.Errorf("invalid log level: %w", err)
+//	}
 func ParseLogLevel(level string) (LogLevel, error) {
 	switch strings.ToUpper(level) {
 	case "DEBUG":
@@ -138,6 +234,32 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
+// DefaultConfig returns a LoggerConfig with sensible default values.
+//
+// Default values:
+//
+//	Filename:        "app"
+//	MaxBytes:        10MB
+//	BackupCount:     5
+//	LogLevel:        DEBUG
+//	TimestampFormat: "2006-01-02 15:04:05.000000"
+//	LogsDir:         "logs"
+//	EnableCaller:    true
+//	BufferSize:      0 (synchronous)
+//	AsyncWorkers:    1
+//	Format:          FormatPlain
+//	EnableFallback:  true
+//	MaxLogRate:      0 (unlimited)
+//	CompressBackups: false
+//	RotationTime:    0 (disabled)
+//	SampleRate:      1 (no sampling)
+//	CallerDepth:     3
+//
+// Example:
+//
+//	config := DefaultConfig()
+//	config.Filename = "myapp"
+//	logger, err := NewGourdianLogger(config)
 func DefaultConfig() LoggerConfig {
 	return LoggerConfig{
 		Filename:        "app",
@@ -160,6 +282,28 @@ func DefaultConfig() LoggerConfig {
 	}
 }
 
+// NewGourdianLogger creates a new logger instance with the specified configuration.
+//
+// Parameters:
+//
+//	config: Logger configuration (see LoggerConfig)
+//
+// Returns:
+//
+//	*Logger: The created logger instance
+//	error:  Any error that occurred during initialization
+//
+// Example:
+//
+//	config := LoggerConfig{
+//	    Filename: "myapp",
+//	    LogLevel: gourdianlogger.INFO,
+//	}
+//	logger, err := NewGourdianLogger(config)
+//	if err != nil {
+//	    log.Fatal("Failed to create logger:", err)
+//	}
+//	defer logger.Close()
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	// Apply environment variable overrides
 	config.ApplyEnvOverrides()
@@ -272,7 +416,21 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
+// NewGourdianLoggerWithDefault creates a new logger with default configuration.
+// This is a convenience function for quick initialization.
+//
+// Returns:
+//
+//	*Logger: Logger instance with default settings
+//	error:  Any initialization error
+//
+// Example:
+//
+//	logger, err := NewGourdianLoggerWithDefault()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer logger.Close()
 func NewGourdianLoggerWithDefault() (*Logger, error) {
 	config := DefaultConfig()
 	return NewGourdianLogger(config)
@@ -802,22 +960,70 @@ func (l *Logger) cleanupOldBackups() {
 	}
 }
 
-// SetLogLevel sets the minimum log level
+// SetLogLevel dynamically changes the minimum log level at runtime.
+// Messages below this level will be ignored.
+//
+// Parameters:
+//
+//	level: New minimum log level (DEBUG, INFO, WARN, ERROR, FATAL)
+//
+// Example:
+//
+//	// Only log warnings and above in production
+//	if isProduction() {
+//	    logger.SetLogLevel(gourdianlogger.WARN)
+//	}
 func (l *Logger) SetLogLevel(level LogLevel) {
 	l.level.Store(int32(level))
 }
 
-// GetLogLevel returns the current log level
+// GetLogLevel returns the current minimum log level.
+//
+// Returns:
+//
+//	LogLevel: The current minimum log level
+//
+// Example:
+//
+//	if logger.GetLogLevel() == gourdianlogger.DEBUG {
+//	    // Perform debug-specific actions
+//	}
 func (l *Logger) GetLogLevel() LogLevel {
 	return LogLevel(l.level.Load())
 }
 
-// SetDynamicLevelFunc sets a function to dynamically determine the log level
+// SetDynamicLevelFunc sets a function that dynamically determines the log level.
+// The function is called for each log message to check if it should be logged.
+// Useful for implementing runtime log level changes without locks.
+//
+// Parameters:
+//
+//	fn: Function that returns the current log level
+//
+// Example:
+//
+//	logger.SetDynamicLevelFunc(func() gourdianlogger.LogLevel {
+//	    if isDebugMode() {
+//	        return gourdianlogger.DEBUG
+//	    }
+//	    return gourdianlogger.INFO
+//	})
 func (l *Logger) SetDynamicLevelFunc(fn func() LogLevel) {
 	l.dynamicLevelFn = fn
 }
 
-// AddOutput adds an additional output writer
+// AddOutput adds an additional output destination for log messages.
+// Supports any io.Writer such as files, network connections, etc.
+//
+// Parameters:
+//
+//	output: The io.Writer to add as output
+//
+// Example:
+//
+//	// Log to both console and file
+//	file, _ := os.Create("app.log")
+//	logger.AddOutput(file)
 func (l *Logger) AddOutput(output io.Writer) {
 	if output == nil {
 		return
@@ -834,7 +1040,15 @@ func (l *Logger) AddOutput(output io.Writer) {
 	l.multiWriter = io.MultiWriter(l.outputs...)
 }
 
-// RemoveOutput removes an output writer
+// RemoveOutput removes an output destination from the logger.
+//
+// Parameters:
+//
+//	output: The io.Writer to remove
+//
+// Example:
+//
+//	logger.RemoveOutput(os.Stdout) // Stop logging to console
 func (l *Logger) RemoveOutput(output io.Writer) {
 	l.outputsMu.Lock()
 	defer l.outputsMu.Unlock()
@@ -852,7 +1066,16 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 	}
 }
 
-// Close shuts down the logger gracefully
+// Close gracefully shuts down the logger, ensuring all buffered logs are written.
+// Should be called before application exit to prevent log loss.
+//
+// Returns:
+//
+//	error: Any error that occurred during shutdown
+//
+// Example:
+//
+//	defer logger.Close()
 func (l *Logger) Close() error {
 	if !l.closed.CompareAndSwap(false, true) {
 		return nil
@@ -877,7 +1100,16 @@ func (l *Logger) Close() error {
 	return nil
 }
 
-// Basic log methods
+// Debug logs a message at DEBUG level.
+// Use for detailed debug information that is typically only needed during development.
+//
+// Parameters:
+//
+//	v: Values to log (concatenated with spaces like fmt.Sprint)
+//
+// Example:
+//
+//	logger.Debug("Current state:", state, "value:", value)
 func (l *Logger) Debug(v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
@@ -900,7 +1132,17 @@ func (l *Logger) Fatal(v ...interface{}) {
 	os.Exit(1)
 }
 
-// Formatted log methods
+// Debugf logs a formatted message at DEBUG level.
+// Supports all formatting verbs from fmt.Sprintf.
+//
+// Parameters:
+//
+//	format: Format string
+//	v:      Values to interpolate into format string
+//
+// Example:
+//
+//	logger.Debugf("User %s (ID: %d) logged in", username, userID)
 func (l *Logger) Debugf(format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
@@ -923,7 +1165,21 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 	os.Exit(1)
 }
 
-// Structured logging methods
+// DebugWithFields logs a message with additional structured fields at DEBUG level.
+// Fields are included in both plain and JSON formats.
+//
+// Parameters:
+//
+//	fields: Key-value pairs of additional context
+//	v:      Values to log
+//
+// Example:
+//
+//	logger.DebugWithFields(map[string]interface{}{
+//	    "user":    "john",
+//	    "action":  "login",
+//	    "success": true,
+//	}, "Authentication attempt")
 func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }
@@ -946,6 +1202,20 @@ func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}
 	os.Exit(1)
 }
 
+// DebugfWithFields logs a formatted message with additional fields at DEBUG level.
+// Combines formatted messages with structured logging.
+//
+// Parameters:
+//
+//	fields: Key-value pairs of additional context
+//	format: Format string
+//	v:      Values to interpolate into format string
+//
+// Example:
+//
+//	logger.DebugfWithFields(map[string]interface{}{
+//	    "duration_ms": 45,
+//	}, "Request processed in %dms", 45)
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }
@@ -968,7 +1238,14 @@ func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, 
 	os.Exit(1)
 }
 
-// Flush ensures all buffered logs are written
+// Flush ensures all buffered logs are written to output.
+// Only needed when using async logging (BufferSize > 0).
+// Automatically called by Close().
+//
+// Example:
+//
+//	// Before exiting ensure all logs are written
+//	logger.Flush()
 func (l *Logger) Flush() {
 	if l.asyncQueue != nil {
 		for len(l.asyncQueue) > 0 {
@@ -977,12 +1254,43 @@ func (l *Logger) Flush() {
 	}
 }
 
-// IsClosed returns whether the logger has been closed
+// IsClosed checks if the logger has been closed.
+//
+// Returns:
+//
+//	bool: true if the logger is closed, false otherwise
+//
+// Example:
+//
+//	if !logger.IsClosed() {
+//	    logger.Info("Application shutting down")
+//	    logger.Close()
+//	}
 func (l *Logger) IsClosed() bool {
 	return l.closed.Load()
 }
 
-// WithConfig creates a logger from JSON configuration
+// WithConfig creates a logger from a JSON configuration string.
+// Useful for loading configuration from files or environment variables.
+//
+// Parameters:
+//
+//	jsonConfig: JSON string containing logger configuration
+//
+// Returns:
+//
+//	*Logger: New logger instance
+//	error:  Any parsing or initialization error
+//
+// Example:
+//
+//	const configJSON = `{
+//	    "filename": "myapp",
+//	    "log_level": "info",
+//	    "max_bytes": 5000000,
+//	    "format": "json"
+//	}`
+//	logger, err := WithConfig(configJSON)
 func WithConfig(jsonConfig string) (*Logger, error) {
 	if !json.Valid([]byte(jsonConfig)) {
 		return nil, fmt.Errorf("invalid JSON config")
