@@ -736,11 +736,6 @@ func BenchmarkTimeBasedRotation(b *testing.B) {
 	config.LogsDir = dir
 	config.RotationTime = time.Millisecond * 10 // Very frequent rotation
 
-	// Reduce benchmark iterations for time-based rotation
-	if b.N > 1000 {
-		b.N = 1000
-	}
-
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
@@ -760,9 +755,22 @@ func BenchmarkTimeBasedRotation(b *testing.B) {
 		}
 	}()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("time-based rotation message")
+	// Run fewer iterations if needed by adjusting the loop
+	maxIterations := 1000
+	if b.N > maxIterations {
+		// Keep original b.N but only run up to maxIterations
+		iterations := maxIterations
+		b.ResetTimer()
+		for i := 0; i < iterations; i++ {
+			logger.Info("time-based rotation message")
+		}
+		b.StopTimer()
+	} else {
+		// Run normal benchmark
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			logger.Info("time-based rotation message")
+		}
 	}
 }
 
