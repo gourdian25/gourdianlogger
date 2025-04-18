@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (72.3%)</option>
 				
 				</select>
 			</div>
@@ -434,7 +434,7 @@ func (lc *LoggerConfig) ApplyEnvOverrides() <span class="cov8" title="1">{
 }
 
 // NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
-func NewGourdianLoggerWithDefault() (*Logger, error) <span class="cov0" title="0">{
+func NewGourdianLoggerWithDefault() (*Logger, error) <span class="cov8" title="1">{
         config := DefaultConfig()
         return NewGourdianLogger(config)
 }</span>
@@ -625,7 +625,7 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, f
 
 func (l *Logger) getCallerInfo(skip int) string <span class="cov8" title="1">{
         pc, file, line, ok := runtime.Caller(skip)
-        if !ok </span><span class="cov0" title="0">{
+        if !ok </span><span class="cov8" title="1">{
                 return ""
         }</span>
 
@@ -746,18 +746,18 @@ func (l *Logger) rotateLogFiles() error <span class="cov8" title="1">{
         return nil</span>
 }
 
-func compressFile(path string) error <span class="cov0" title="0">{
+func compressFile(path string) error <span class="cov8" title="1">{
         src, err := os.Open(path)
         if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
-        <span class="cov0" title="0">defer src.Close()
+        <span class="cov8" title="1">defer src.Close()
 
         dst, err := os.Create(path + ".gz")
         if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
-        <span class="cov0" title="0">defer dst.Close()
+        <span class="cov8" title="1">defer dst.Close()
 
         gz := gzip.NewWriter(dst)
         defer gz.Close()
@@ -767,7 +767,7 @@ func compressFile(path string) error <span class="cov0" title="0">{
         }</span>
 
         // Remove original file after successful compression
-        <span class="cov0" title="0">return os.Remove(path)</span>
+        <span class="cov8" title="1">return os.Remove(path)</span>
 }
 
 func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
@@ -905,7 +905,7 @@ func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" titl
 }</span>
 
 // Structured logging methods
-func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }</span>
 
@@ -913,11 +913,11 @@ func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{})
         l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }</span>
 
-func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }</span>
 
-func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }</span>
 
@@ -931,15 +931,15 @@ func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, 
         l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }</span>
 
-func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }</span>
 
-func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }</span>
 
-func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }</span>
 

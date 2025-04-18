@@ -680,3 +680,68 @@ func TestCloseIdempotency(t *testing.T) {
 	assert.NoError(t, logger.Close())
 	assert.NoError(t, logger.Close(), "Close should be idempotent")
 }
+func TestCompressFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.log")
+	content := []byte("test log data")
+
+	err := os.WriteFile(filePath, content, 0644)
+	require.NoError(t, err)
+
+	err = compressFile(filePath)
+	require.NoError(t, err)
+
+	// Check compressed file exists
+	_, err = os.Stat(filePath + ".gz")
+	assert.NoError(t, err, "Compressed file should exist")
+
+	// Original file should be removed
+	_, err = os.Stat(filePath)
+	assert.True(t, os.IsNotExist(err), "Original file should be deleted")
+}
+func TestNewGourdianLoggerWithDefault(t *testing.T) {
+	logger, err := NewGourdianLoggerWithDefault()
+	assert.NoError(t, err)
+	assert.NotNil(t, logger)
+
+	defer logger.Close()
+	logger.Info("test default config logger")
+}
+
+func TestAllStructuredLogLevels(t *testing.T) {
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.Outputs = []io.Writer{&buf}
+	config.LogsDir = t.TempDir()
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	fields := map[string]interface{}{"foo": "bar"}
+
+	logger.DebugWithFields(fields, "debug")
+	logger.WarnWithFields(fields, "warn")
+	logger.ErrorWithFields(fields, "error")
+
+	logger.InfofWithFields(fields, "info %d", 123)
+	logger.WarnfWithFields(fields, "warn %s", "msg")
+	logger.ErrorfWithFields(fields, "error %s", "failure")
+
+	log := buf.String()
+	assert.Contains(t, log, "foo=bar")
+}
+
+func TestGetCallerInfoFallback(t *testing.T) {
+	logger := &Logger{}
+	info := logger.getCallerInfo(9999) // Intentionally too deep in stack
+
+	// It can be empty, but should not crash or panic
+	assert.True(t, info == "" || strings.Contains(info, ":"), "Caller info fallback should be safe and formatted if returned")
+}
+
+func TestGetCallerInfoValid(t *testing.T) {
+	logger := &Logger{}
+	info := logger.getCallerInfo(1) // A safe depth
+
+	assert.Contains(t, info, ".go", "Caller info should contain a Go file reference")
+}
