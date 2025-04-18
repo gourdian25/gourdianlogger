@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (72.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (74.9%)</option>
 				
 				</select>
 			</div>
@@ -307,7 +307,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         }</span>
 
         // Initialize rate limiter if configured
-        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov8" title="1">{
                 logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
         }</span>
 
@@ -654,7 +654,7 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 
 func (l *Logger) log(level LogLevel, message string, skip int, fields map[string]interface{}) <span class="cov8" title="1">{
         // Apply rate limiting if configured
-        if l.rateLimiter != nil &amp;&amp; !l.rateLimiter.Allow() </span><span class="cov0" title="0">{
+        if l.rateLimiter != nil &amp;&amp; !l.rateLimiter.Allow() </span><span class="cov8" title="1">{
                 return
         }</span>
 
@@ -886,19 +886,19 @@ func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov8" titl
         l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }</span>
 
-func (l *Logger) Infof(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Infof(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }</span>
 
-func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }</span>
 
-func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }</span>
 
-func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
         l.Flush()
         os.Exit(1)
@@ -927,7 +927,7 @@ func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}
         os.Exit(1)
 }</span>
 
-func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }</span>
 
@@ -959,7 +959,7 @@ func (l *Logger) Flush() <span class="cov8" title="1">{
 }
 
 // IsClosed returns whether the logger has been closed
-func (l *Logger) IsClosed() bool <span class="cov0" title="0">{
+func (l *Logger) IsClosed() bool <span class="cov8" title="1">{
         return l.closed.Load()
 }</span>
 

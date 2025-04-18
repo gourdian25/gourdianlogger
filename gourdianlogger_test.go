@@ -745,3 +745,179 @@ func TestGetCallerInfoValid(t *testing.T) {
 
 	assert.Contains(t, info, ".go", "Caller info should contain a Go file reference")
 }
+
+func TestRateLimiting(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&buf}
+	config.MaxLogRate = 10 // 10 logs per second max
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	// Burst of logs that should be rate limited
+	for i := 0; i < 20; i++ {
+		logger.Info(fmt.Sprintf("message %d", i))
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	assert.LessOrEqual(t, len(lines), 15, "Expected rate limiting to reduce number of logs")
+}
+
+func TestLogLevelString(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		level    LogLevel
+		expected string
+	}{
+		{DEBUG, "DEBUG"},
+		{INFO, "INFO"},
+		{WARN, "WARN"},
+		{ERROR, "ERROR"},
+		{FATAL, "FATAL"},
+		{LogLevel(99), ""}, // Test out of bounds
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if tt.level == 99 {
+				assert.Panics(t, func() { _ = tt.level.String() })
+			} else {
+				assert.Equal(t, tt.expected, tt.level.String())
+			}
+		})
+	}
+}
+
+func TestIsClosed(t *testing.T) {
+	t.Parallel()
+
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+
+	assert.False(t, logger.IsClosed(), "Logger should not be closed initially")
+	logger.Close()
+	assert.True(t, logger.IsClosed(), "Logger should be closed after Close()")
+}
+
+func TestAllFormattedLogMethods(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+	config.Outputs = []io.Writer{&buf}
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	tests := []struct {
+		name    string
+		logFunc func()
+		expect  string
+	}{
+		{"Debugf", func() { logger.Debugf("debug %s", "msg") }, "debug msg"},
+		{"Infof", func() { logger.Infof("info %s", "msg") }, "info msg"},
+		{"Warnf", func() { logger.Warnf("warn %s", "msg") }, "warn msg"},
+		{"Errorf", func() { logger.Errorf("error %s", "msg") }, "error msg"},
+		{"DebugfWithFields", func() { logger.DebugfWithFields(map[string]interface{}{"f": 1}, "debug %s", "msg") }, "debug msg"},
+		{"InfofWithFields", func() { logger.InfofWithFields(map[string]interface{}{"f": 1}, "info %s", "msg") }, "info msg"},
+		{"WarnfWithFields", func() { logger.WarnfWithFields(map[string]interface{}{"f": 1}, "warn %s", "msg") }, "warn msg"},
+		{"ErrorfWithFields", func() { logger.ErrorfWithFields(map[string]interface{}{"f": 1}, "error %s", "msg") }, "error msg"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf.Reset()
+			tt.logFunc()
+			assert.Contains(t, buf.String(), tt.expect)
+		})
+	}
+}
+
+func TestFatalVariants(t *testing.T) {
+	if os.Getenv("BE_CRASHER") == "1" {
+		config := DefaultConfig()
+		config.LogsDir = "test_logs"
+		config.Outputs = []io.Writer{io.Discard}
+
+		logger, err := NewGourdianLogger(config)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		logger.Fatalf("fatal %s", "message")
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestFatalVariants")
+	cmd.Env = append(os.Environ(), "BE_CRASHER=1")
+	err := cmd.Run()
+
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return
+	}
+	t.Fatalf("process ran with err %v, want exit status 1", err)
+}
+
+func TestMultipleFields(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.Format = FormatJSON
+	config.Outputs = []io.Writer{&buf}
+	config.LogsDir = "test_logs"
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	fields := map[string]interface{}{
+		"string": "value",
+		"number": 42,
+		"bool":   true,
+	}
+
+	logger.InfoWithFields(fields, "test message")
+
+	var data map[string]interface{}
+	err = json.Unmarshal(buf.Bytes(), &data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "value", data["string"])
+	assert.Equal(t, float64(42), data["number"])
+	assert.Equal(t, true, data["bool"])
+}
+
+func TestDefaultConfig(t *testing.T) {
+	t.Parallel()
+
+	config := DefaultConfig()
+
+	assert.Equal(t, "app", config.Filename)
+	assert.Equal(t, defaultMaxBytes, config.MaxBytes)
+	assert.Equal(t, defaultBackupCount, config.BackupCount)
+	assert.Equal(t, DEBUG, config.LogLevel)
+	assert.Equal(t, defaultTimestampFormat, config.TimestampFormat)
+	assert.Equal(t, defaultLogsDir, config.LogsDir)
+	assert.True(t, config.EnableCaller)
+	assert.Equal(t, 0, config.BufferSize)
+	assert.Equal(t, 1, config.AsyncWorkers)
+	assert.Equal(t, FormatPlain, config.Format)
+	assert.True(t, config.EnableFallback)
+	assert.Equal(t, 0, config.MaxLogRate)
+	assert.False(t, config.CompressBackups)
+	assert.Equal(t, time.Duration(0), config.RotationTime)
+	assert.Equal(t, 1, config.SampleRate)
+	assert.Equal(t, 3, config.CallerDepth)
+}
