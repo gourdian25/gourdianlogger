@@ -1102,30 +1102,73 @@ func (l *Logger) Close() error {
 
 // Debug logs a message at DEBUG level.
 // Use for detailed debug information that is typically only needed during development.
+// Messages are concatenated with spaces like fmt.Sprint.
 //
 // Parameters:
 //
-//	v: Values to log (concatenated with spaces like fmt.Sprint)
+//	v: Values to log (any number of parameters, concatenated with spaces)
 //
 // Example:
 //
 //	logger.Debug("Current state:", state, "value:", value)
+//	Output: "Current state: running value: 42"
 func (l *Logger) Debug(v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
+// Info logs a message at INFO level.
+// Use for general operational messages about application flow.
+//
+// Parameters:
+//
+//	v: Values to log (concatenated with spaces)
+//
+// Example:
+//
+//	logger.Info("Server started on port", port)
 func (l *Logger) Info(v ...interface{}) {
 	l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
+// Warn logs a message at WARN level.
+// Use for potentially harmful situations that aren't errors.
+//
+// Parameters:
+//
+//	v: Values to log (concatenated with spaces)
+//
+// Example:
+//
+//	logger.Warn("Disk space below 10%")
 func (l *Logger) Warn(v ...interface{}) {
 	l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
+// Error logs a message at ERROR level.
+// Use for error events that might still allow the application to continue.
+//
+// Parameters:
+//
+//	v: Values to log (concatenated with spaces)
+//
+// Example:
+//
+//	logger.Error("Failed to connect to database:", err)
 func (l *Logger) Error(v ...interface{}) {
 	l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, nil)
 }
 
+// Fatal logs a message at FATAL level and exits the program with status 1.
+// Use for severe errors that prevent the application from continuing.
+// Automatically flushes any buffered logs before exiting.
+//
+// Parameters:
+//
+//	v: Values to log (concatenated with spaces)
+//
+// Example:
+//
+//	logger.Fatal("Cannot start - required service unavailable")
 func (l *Logger) Fatal(v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, nil)
 	l.Flush()
@@ -1137,8 +1180,8 @@ func (l *Logger) Fatal(v ...interface{}) {
 //
 // Parameters:
 //
-//	format: Format string
-//	v:      Values to interpolate into format string
+//	format: Format string (supports %v, %s, %d etc.)
+//	v:      Values to interpolate into the format string
 //
 // Example:
 //
@@ -1147,18 +1190,59 @@ func (l *Logger) Debugf(format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
+// Infof logs a formatted message at INFO level.
+//
+// Parameters:
+//
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.Infof("Processing %d records took %v", count, duration)
 func (l *Logger) Infof(format string, v ...interface{}) {
 	l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
+// Warnf logs a formatted message at WARN level.
+//
+// Parameters:
+//
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.Warnf("High latency detected: %.2fms", latencyMs)
 func (l *Logger) Warnf(format string, v ...interface{}) {
 	l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
+// Errorf logs a formatted message at ERROR level.
+//
+// Parameters:
+//
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.Errorf("Failed to process request: %v", err)
 func (l *Logger) Errorf(format string, v ...interface{}) {
 	l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 }
 
+// Fatalf logs a formatted message at FATAL level and exits the program.
+// Automatically flushes any buffered logs before exiting.
+//
+// Parameters:
+//
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.Fatalf("Critical error: %v - shutting down", criticalErr)
 func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
 	l.Flush()
@@ -1170,8 +1254,8 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 //
 // Parameters:
 //
-//	fields: Key-value pairs of additional context
-//	v:      Values to log
+//	fields: Key-value pairs of additional context (map[string]interface{})
+//	v:      Values to log (concatenated with spaces)
 //
 // Example:
 //
@@ -1184,54 +1268,160 @@ func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}
 	l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }
 
+// InfoWithFields logs a message with additional fields at INFO level.
+//
+// Parameters:
+//
+//	fields: Additional context as key-value pairs
+//	v:      Values to log
+//
+// Example:
+//
+//	logger.InfoWithFields(map[string]interface{}{
+//	    "request_id": reqID,
+//	    "duration":   duration,
+//	}, "Request processed")
 func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }
 
+// WarnWithFields logs a message with additional fields at WARN level.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	v:      Values to log
+//
+// Example:
+//
+//	logger.WarnWithFields(map[string]interface{}{
+//	    "threshold": 90,
+//	    "current":   usage,
+//	}, "Resource usage high")
 func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }
 
+// ErrorWithFields logs a message with additional fields at ERROR level.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	v:      Values to log
+//
+// Example:
+//
+//	logger.ErrorWithFields(map[string]interface{}{
+//	    "function": "processPayment",
+//	    "order_id": orderID,
+//	}, "Payment processing failed")
 func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, fields)
 }
 
+// FatalWithFields logs a message with additional fields at FATAL level and exits.
+// Automatically flushes any buffered logs before exiting.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	v:      Values to log
+//
+// Example:
+//
+//	logger.FatalWithFields(map[string]interface{}{
+//	    "error_code": 5001,
+//	    "component": "database",
+//	}, "Critical database failure")
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, fields)
 	l.Flush()
 	os.Exit(1)
 }
 
-// DebugfWithFields logs a formatted message with additional fields at DEBUG level.
-// Combines formatted messages with structured logging.
+// DebugfWithFields combines formatted messages with structured logging at DEBUG level.
 //
 // Parameters:
 //
-//	fields: Key-value pairs of additional context
-//	format: Format string
+//	fields: Additional context as key-value pairs
+//	format: Format string (supports %v, %s etc.)
 //	v:      Values to interpolate into format string
 //
 // Example:
 //
 //	logger.DebugfWithFields(map[string]interface{}{
 //	    "duration_ms": 45,
+//	    "method":      "GET",
 //	}, "Request processed in %dms", 45)
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }
 
+// InfofWithFields combines formatted messages with structured logging at INFO level.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.InfofWithFields(map[string]interface{}{
+//	    "user_count": count,
+//	}, "Processed %d users", count)
 func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }
 
+// WarnfWithFields combines formatted messages with structured logging at WARN level.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.WarnfWithFields(map[string]interface{}{
+//	    "threshold": 90,
+//	}, "CPU usage at %d%%", usage)
 func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }
 
+// ErrorfWithFields combines formatted messages with structured logging at ERROR level.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.ErrorfWithFields(map[string]interface{}{
+//	    "request_id": reqID,
+//	}, "Failed to process request %s", reqID)
 func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 }
 
+// FatalfWithFields combines formatted messages with structured logging at FATAL level and exits.
+// Automatically flushes any buffered logs before exiting.
+//
+// Parameters:
+//
+//	fields: Additional context
+//	format: Format string
+//	v:      Values to interpolate
+//
+// Example:
+//
+//	logger.FatalfWithFields(map[string]interface{}{
+//	    "error_code": 5001,
+//	}, "Critical error %d occurred", errCode)
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
 	l.Flush()
