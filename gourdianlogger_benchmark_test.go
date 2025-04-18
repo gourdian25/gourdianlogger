@@ -778,17 +778,17 @@ func BenchmarkMixedOperations(b *testing.B) {
 	}
 	defer logger.Close()
 
-	fields := map[string]interface{}{
-		"operation": "mixed",
-		"count":     0,
-	}
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		count := 0
 		for pb.Next() {
 			count++
-			fields["count"] = count
+
+			// Create a new map for each iteration to avoid concurrent access
+			fields := map[string]interface{}{
+				"goroutine": count % 10,
+				"iteration": count,
+			}
 
 			switch count % 5 {
 			case 0:
@@ -806,4 +806,14 @@ func BenchmarkMixedOperations(b *testing.B) {
 	})
 	b.StopTimer()
 	logger.Flush()
+}
+
+func BenchmarkWithSharedData(b *testing.B) {
+	var sharedMap sync.Map
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			sharedMap.Store("key", "value") // Thread-safe operation
+		}
+	})
 }
