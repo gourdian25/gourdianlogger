@@ -79,7 +79,10 @@ type FormatConfig struct {
 
 // Logger is the main logging struct
 type Logger struct {
-	mu              sync.RWMutex
+	fileMu       sync.Mutex   // Protects file operations
+	bufferPoolMu sync.Mutex   // Protects buffer pool access
+	outputsMu    sync.RWMutex // Protects outputs slice
+
 	level           atomic.Int32
 	baseFilename    string
 	maxBytes        int64
@@ -337,26 +340,26 @@ func (lc *LoggerConfig) ApplyEnvOverrides() {
 	}
 }
 
-// fileSizeRotationWorker listens for manual rotation triggers (e.g., after write or on demand)
+// fileSizeRotationWorker listens for manual rotation triggers
 func (l *Logger) fileSizeRotationWorker() {
 	defer l.wg.Done()
 	for {
 		select {
 		case <-l.rotateChan:
-			l.mu.Lock()
+			l.fileMu.Lock()
 			if l.file != nil {
 				if err := l.rotateLogFiles(); err != nil {
 					l.handleError(fmt.Errorf("log rotation failed: %w", err))
 				}
 			}
-			l.mu.Unlock()
+			l.fileMu.Unlock()
 		case <-l.rotateCloseChan:
 			return
 		}
 	}
 }
 
-// timeRotationWorker triggers rotation at regular intervals if RotationTime is set
+// timeRotationWorker triggers rotation at regular intervals
 func (l *Logger) timeRotationWorker(interval time.Duration) {
 	defer l.wg.Done()
 	ticker := time.NewTicker(interval)
@@ -365,27 +368,45 @@ func (l *Logger) timeRotationWorker(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			l.mu.Lock()
+			l.fileMu.Lock()
 			if l.file != nil {
 				if err := l.rotateLogFiles(); err != nil {
 					l.handleError(fmt.Errorf("time-based log rotation failed: %w", err))
 				}
 			}
-			l.mu.Unlock()
+			l.fileMu.Unlock()
 		case <-l.rotateCloseChan:
 			return
 		}
 	}
 }
 
+// asyncWorker processes log entries asynchronously
 func (l *Logger) asyncWorker() {
 	defer l.wg.Done()
+
+	// Batch processing variables
+	batch := make([]*logEntry, 0, 100)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case entry := <-l.asyncQueue:
-			l.processLogEntry(entry.level, entry.message, entry.callerInfo, entry.fields)
+			batch = append(batch, entry)
+			if len(batch) >= 100 {
+				l.processBatch(batch)
+				batch = batch[:0]
+			}
+		case <-ticker.C:
+			if len(batch) > 0 {
+				l.processBatch(batch)
+				batch = batch[:0]
+			}
 		case <-l.asyncCloseChan:
+			if len(batch) > 0 {
+				l.processBatch(batch)
+			}
 			// Drain the queue before exiting
 			for {
 				select {
@@ -399,6 +420,58 @@ func (l *Logger) asyncWorker() {
 	}
 }
 
+// processBatch processes a batch of log entries while holding the file lock
+func (l *Logger) processBatch(entries []*logEntry) {
+	l.fileMu.Lock()
+	defer l.fileMu.Unlock()
+
+	for _, entry := range entries {
+		currentLevel := l.GetLogLevel()
+		if l.dynamicLevelFn != nil {
+			currentLevel = l.dynamicLevelFn()
+		}
+
+		if entry.level < currentLevel {
+			continue
+		}
+
+		// Apply sampling if configured
+		if l.config.SampleRate > 1 && rand.Intn(l.config.SampleRate) != 0 {
+			continue
+		}
+
+		// Get buffer with minimal locking
+		l.bufferPoolMu.Lock()
+		buf := l.bufferPool.Get().(*bytes.Buffer)
+		l.bufferPoolMu.Unlock()
+
+		buf.Reset()
+		defer func() {
+			l.bufferPoolMu.Lock()
+			l.bufferPool.Put(buf)
+			l.bufferPoolMu.Unlock()
+		}()
+
+		buf.WriteString(l.formatMessage(entry.level, entry.message, entry.callerInfo, entry.fields))
+
+		if l.closed.Load() {
+			fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
+			continue
+		}
+
+		if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
+			l.handleError(fmt.Errorf("log write error: %w", err))
+			if l.fallbackWriter != nil {
+				fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
+			}
+		}
+
+		if entry.level == FATAL {
+			os.Exit(1)
+		}
+	}
+}
+
 func (l *Logger) handleError(err error) {
 	if l.errorHandler != nil {
 		l.errorHandler(err)
@@ -407,6 +480,7 @@ func (l *Logger) handleError(err error) {
 	}
 }
 
+// processLogEntry processes a single log entry
 func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo string, fields map[string]interface{}) {
 	currentLevel := l.GetLogLevel()
 	if l.dynamicLevelFn != nil {
@@ -422,14 +496,22 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 		return
 	}
 
+	// Get buffer with minimal locking
+	l.bufferPoolMu.Lock()
 	buf := l.bufferPool.Get().(*bytes.Buffer)
+	l.bufferPoolMu.Unlock()
+
 	buf.Reset()
-	defer l.bufferPool.Put(buf)
+	defer func() {
+		l.bufferPoolMu.Lock()
+		l.bufferPool.Put(buf)
+		l.bufferPoolMu.Unlock()
+	}()
 
 	buf.WriteString(l.formatMessage(level, message, callerInfo, fields))
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.fileMu.Lock()
+	defer l.fileMu.Unlock()
 
 	if l.closed.Load() {
 		fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
@@ -448,6 +530,7 @@ func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo stri
 	}
 }
 
+// formatPlain formats a log message in plain text
 func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	levelStr := fmt.Sprintf("[%s]", level.String())
 	timestampStr := time.Now().Format(l.timestampFormat)
@@ -485,6 +568,7 @@ func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string, 
 	return builder.String()
 }
 
+// formatJSON formats a log message in JSON
 func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	logEntry := map[string]interface{}{
 		"timestamp": time.Now().Format(l.timestampFormat),
@@ -521,6 +605,7 @@ func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, f
 	return string(jsonData) + "\n"
 }
 
+// getCallerInfo retrieves information about the caller
 func (l *Logger) getCallerInfo(skip int) string {
 	pc, file, line, ok := runtime.Caller(skip)
 	if !ok {
@@ -541,6 +626,7 @@ func (l *Logger) getCallerInfo(skip int) string {
 	return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)
 }
 
+// formatMessage formats the log message according to the configured format
 func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string {
 	switch l.format {
 	case FormatJSON:
@@ -550,6 +636,7 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 	}
 }
 
+// log is the internal logging method
 func (l *Logger) log(level LogLevel, message string, skip int, fields map[string]interface{}) {
 	// Apply rate limiting if configured
 	if l.rateLimiter != nil && !l.rateLimiter.Allow() {
@@ -573,6 +660,7 @@ func (l *Logger) log(level LogLevel, message string, skip int, fields map[string
 	}
 }
 
+// rotateLogFiles performs log file rotation
 func (l *Logger) rotateLogFiles() error {
 	t := time.Now()
 	defer func() {
@@ -624,12 +712,16 @@ func (l *Logger) rotateLogFiles() error {
 
 	// Update logger state
 	l.file = file
+
+	// Update outputs with minimal locking
+	l.outputsMu.Lock()
 	outputs := []io.Writer{os.Stdout, file}
 	if len(l.outputs) > 2 {
 		outputs = append(outputs, l.outputs[2:]...)
 	}
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
+	l.outputsMu.Unlock()
 
 	// Compress backup if configured
 	if l.config.CompressBackups {
@@ -644,6 +736,7 @@ func (l *Logger) rotateLogFiles() error {
 	return nil
 }
 
+// compressFile compresses a file using gzip
 func compressFile(path string) error {
 	src, err := os.Open(path)
 	if err != nil {
@@ -668,6 +761,7 @@ func compressFile(path string) error {
 	return os.Remove(path)
 }
 
+// cleanupOldBackups removes old log backups exceeding the backup count
 func (l *Logger) cleanupOldBackups() {
 	pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log*"
 	files, err := filepath.Glob(pattern)
@@ -687,25 +781,29 @@ func (l *Logger) cleanupOldBackups() {
 	}
 }
 
+// SetLogLevel sets the minimum log level
 func (l *Logger) SetLogLevel(level LogLevel) {
 	l.level.Store(int32(level))
 }
 
+// GetLogLevel returns the current log level
 func (l *Logger) GetLogLevel() LogLevel {
 	return LogLevel(l.level.Load())
 }
 
+// SetDynamicLevelFunc sets a function to dynamically determine the log level
 func (l *Logger) SetDynamicLevelFunc(fn func() LogLevel) {
 	l.dynamicLevelFn = fn
 }
 
+// AddOutput adds an additional output writer
 func (l *Logger) AddOutput(output io.Writer) {
 	if output == nil {
 		return
 	}
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.outputsMu.Lock()
+	defer l.outputsMu.Unlock()
 
 	if l.closed.Load() {
 		return
@@ -715,9 +813,10 @@ func (l *Logger) AddOutput(output io.Writer) {
 	l.multiWriter = io.MultiWriter(l.outputs...)
 }
 
+// RemoveOutput removes an output writer
 func (l *Logger) RemoveOutput(output io.Writer) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.outputsMu.Lock()
+	defer l.outputsMu.Unlock()
 
 	if l.closed.Load() {
 		return
@@ -732,6 +831,7 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 	}
 }
 
+// Close shuts down the logger gracefully
 func (l *Logger) Close() error {
 	if !l.closed.CompareAndSwap(false, true) {
 		return nil
@@ -746,8 +846,8 @@ func (l *Logger) Close() error {
 	// Wait for all workers to finish
 	l.wg.Wait()
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.fileMu.Lock()
+	defer l.fileMu.Unlock()
 
 	// Close file last
 	if l.file != nil {
