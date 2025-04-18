@@ -368,13 +368,24 @@ func (l *Logger) timeRotationWorker(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
+			shouldRotate := false
+
+			// Check if we should rotate without holding the lock
 			l.fileMu.Lock()
 			if l.file != nil {
-				if err := l.rotateLogFiles(); err != nil {
-					l.handleError(fmt.Errorf("time-based log rotation failed: %w", err))
+				if l.config.RotationTime > 0 {
+					shouldRotate = true
 				}
 			}
 			l.fileMu.Unlock()
+
+			if shouldRotate {
+				// Perform rotation (which will take its own locks)
+				if err := l.rotateLogFiles(); err != nil {
+					// Use non-blocking error handling
+					go l.handleError(fmt.Errorf("time-based log rotation failed: %w", err))
+				}
+			}
 		case <-l.rotateCloseChan:
 			return
 		}
@@ -663,12 +674,21 @@ func (l *Logger) log(level LogLevel, message string, skip int, fields map[string
 // rotateLogFiles performs log file rotation
 func (l *Logger) rotateLogFiles() error {
 	t := time.Now()
+	var rotationErr error
+
+	// Move the debug log outside the locked section
 	defer func() {
-		l.Debugf("rotateLogFiles completed in %v", time.Since(t))
+		if rotationErr == nil {
+			go l.Debugf("rotateLogFiles completed in %v", time.Since(t))
+		}
 	}()
 
+	l.fileMu.Lock()
+	defer l.fileMu.Unlock()
+
 	if l.file == nil {
-		return fmt.Errorf("log file not open")
+		rotationErr = fmt.Errorf("log file not open")
+		return rotationErr
 	}
 
 	// Get current file info
@@ -733,7 +753,8 @@ func (l *Logger) rotateLogFiles() error {
 	}
 
 	l.cleanupOldBackups()
-	return nil
+
+	return rotationErr
 }
 
 // compressFile compresses a file using gzip
