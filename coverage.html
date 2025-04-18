@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (76.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (79.0%)</option>
 				
 				</select>
 			</div>
@@ -118,29 +118,28 @@ var (
 )
 
 // LoggerConfig holds configuration for the logger
-// LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
         Filename        string        `json:"filename"`         // Base filename for logs
         MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
         BackupCount     int           `json:"backup_count"`     // Number of backups to keep
-        LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
         LogLevelStr     string        `json:"log_level"`        // Log level as string (for config)
         TimestampFormat string        `json:"timestamp_format"` // Custom timestamp format
-        Outputs         []io.Writer   `json:"-"`                // Additional outputs
         LogsDir         string        `json:"logs_dir"`         // Directory for log files
         EnableCaller    bool          `json:"enable_caller"`    // Include caller info
         BufferSize      int           `json:"buffer_size"`      // Buffer size for async logging
         AsyncWorkers    int           `json:"async_workers"`    // Number of async workers
-        Format          LogFormat     `json:"-"`                // Log message format (internal use)
         FormatStr       string        `json:"format"`           // Format as string (for config)
         FormatConfig    FormatConfig  `json:"format_config"`    // Format-specific config
         EnableFallback  bool          `json:"enable_fallback"`  // Whether to use fallback logging
-        ErrorHandler    func(error)   `json:"-"`                // Custom error handler
         MaxLogRate      int           `json:"max_log_rate"`     // Max logs per second (0 for unlimited)
         CompressBackups bool          `json:"compress_backups"` // Whether to gzip rotated logs
         RotationTime    time.Duration `json:"rotation_time"`    // Time-based rotation interval
         SampleRate      int           `json:"sample_rate"`      // Log sampling rate (1 in N)
         CallerDepth     int           `json:"caller_depth"`     // How many stack frames to skip
+        LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
+        Outputs         []io.Writer   `json:"-"`                // Additional outputs
+        Format          LogFormat     `json:"-"`                // Log message format (internal use)
+        ErrorHandler    func(error)   `json:"-"`                // Custom error handler
 }
 
 // FormatConfig contains format-specific configuration
@@ -341,6 +340,12 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         <span class="cov8" title="1">return logger, nil</span>
 }
 
+// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
+func NewGourdianLoggerWithDefault() (*Logger, error) <span class="cov8" title="1">{
+        config := DefaultConfig()
+        return NewGourdianLogger(config)
+}</span>
+
 // Validate checks the LoggerConfig for valid values
 func (lc *LoggerConfig) Validate() error <span class="cov8" title="1">{
         if lc.MaxBytes &lt; 0 </span><span class="cov0" title="0">{
@@ -385,36 +390,6 @@ func (lc *LoggerConfig) Validate() error <span class="cov8" title="1">{
         <span class="cov8" title="1">return nil</span>
 }
 
-// Complete initializes the internal fields from string representations
-func (lc *LoggerConfig) Complete() error <span class="cov0" title="0">{
-        // Parse log level
-        if lc.LogLevelStr != "" </span><span class="cov0" title="0">{
-                level, err := ParseLogLevel(lc.LogLevelStr)
-                if err != nil </span><span class="cov0" title="0">{
-                        return fmt.Errorf("invalid log level: %w", err)
-                }</span>
-                <span class="cov0" title="0">lc.LogLevel = level</span>
-        } else<span class="cov0" title="0"> {
-                lc.LogLevel = DEBUG // default
-        }</span>
-
-        // Parse format
-        <span class="cov0" title="0">if lc.FormatStr != "" </span><span class="cov0" title="0">{
-                switch strings.ToUpper(lc.FormatStr) </span>{
-                case "PLAIN":<span class="cov0" title="0">
-                        lc.Format = FormatPlain</span>
-                case "JSON":<span class="cov0" title="0">
-                        lc.Format = FormatJSON</span>
-                default:<span class="cov0" title="0">
-                        return fmt.Errorf("invalid log format: %s", lc.FormatStr)</span>
-                }
-        } else<span class="cov0" title="0"> {
-                lc.Format = FormatPlain // default
-        }</span>
-
-        <span class="cov0" title="0">return nil</span>
-}
-
 // ApplyEnvOverrides applies environment variable overrides to the config
 func (lc *LoggerConfig) ApplyEnvOverrides() <span class="cov8" title="1">{
         if dir := os.Getenv("LOG_DIR"); dir != "" </span><span class="cov8" title="1">{
@@ -432,12 +407,6 @@ func (lc *LoggerConfig) ApplyEnvOverrides() <span class="cov8" title="1">{
                 }</span>
         }
 }
-
-// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
-func NewGourdianLoggerWithDefault() (*Logger, error) <span class="cov8" title="1">{
-        config := DefaultConfig()
-        return NewGourdianLogger(config)
-}</span>
 
 // fileSizeRotationWorker listens for manual rotation triggers (e.g., after write or on demand)
 func (l *Logger) fileSizeRotationWorker() <span class="cov8" title="1">{

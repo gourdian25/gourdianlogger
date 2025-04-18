@@ -47,7 +47,6 @@ var (
 )
 
 // LoggerConfig holds configuration for the logger
-// LoggerConfig holds configuration for the logger
 type LoggerConfig struct {
 	Filename        string        `json:"filename"`         // Base filename for logs
 	MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
@@ -270,6 +269,12 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
+// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
+func NewGourdianLoggerWithDefault() (*Logger, error) {
+	config := DefaultConfig()
+	return NewGourdianLogger(config)
+}
+
 // Validate checks the LoggerConfig for valid values
 func (lc *LoggerConfig) Validate() error {
 	if lc.MaxBytes < 0 {
@@ -314,36 +319,6 @@ func (lc *LoggerConfig) Validate() error {
 	return nil
 }
 
-// Complete initializes the internal fields from string representations
-func (lc *LoggerConfig) Complete() error {
-	// Parse log level
-	if lc.LogLevelStr != "" {
-		level, err := ParseLogLevel(lc.LogLevelStr)
-		if err != nil {
-			return fmt.Errorf("invalid log level: %w", err)
-		}
-		lc.LogLevel = level
-	} else {
-		lc.LogLevel = DEBUG // default
-	}
-
-	// Parse format
-	if lc.FormatStr != "" {
-		switch strings.ToUpper(lc.FormatStr) {
-		case "PLAIN":
-			lc.Format = FormatPlain
-		case "JSON":
-			lc.Format = FormatJSON
-		default:
-			return fmt.Errorf("invalid log format: %s", lc.FormatStr)
-		}
-	} else {
-		lc.Format = FormatPlain // default
-	}
-
-	return nil
-}
-
 // ApplyEnvOverrides applies environment variable overrides to the config
 func (lc *LoggerConfig) ApplyEnvOverrides() {
 	if dir := os.Getenv("LOG_DIR"); dir != "" {
@@ -360,12 +335,6 @@ func (lc *LoggerConfig) ApplyEnvOverrides() {
 			lc.MaxLogRate = r
 		}
 	}
-}
-
-// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
-func NewGourdianLoggerWithDefault() (*Logger, error) {
-	config := DefaultConfig()
-	return NewGourdianLogger(config)
 }
 
 // fileSizeRotationWorker listens for manual rotation triggers (e.g., after write or on demand)
