@@ -246,9 +246,15 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 		return new(bytes.Buffer)
 	}
 
-	// Start rotation worker
+	// Start file size-based rotation worker
 	logger.wg.Add(1)
-	go logger.rotationWorker()
+	go logger.fileSizeRotationWorker()
+
+	// Start time-based rotation worker only if enabled
+	if config.RotationTime > 0 {
+		logger.wg.Add(1)
+		go logger.timeRotationWorker(config.RotationTime)
+	}
 
 	// Initialize async logging if configured
 	if config.BufferSize > 0 {
@@ -362,27 +368,38 @@ func NewGourdianLoggerWithDefault() (*Logger, error) {
 	return NewGourdianLogger(config)
 }
 
-func (l *Logger) rotationWorker() {
+// fileSizeRotationWorker listens for manual rotation triggers (e.g., after write or on demand)
+func (l *Logger) fileSizeRotationWorker() {
 	defer l.wg.Done()
-
-	if l.config.RotationTime > 0 {
-		ticker := time.NewTicker(l.config.RotationTime)
-		go func() {
-			for range ticker.C {
-				l.rotateChan <- struct{}{}
-			}
-		}()
-		defer ticker.Stop()
-	}
-
 	for {
 		select {
 		case <-l.rotateChan:
 			l.mu.Lock()
-			if err := l.rotateLogFiles(); err != nil {
-				l.handleError(fmt.Errorf("log rotation failed: %w", err))
+			if l.file != nil {
+				if err := l.rotateLogFiles(); err != nil {
+					l.handleError(fmt.Errorf("log rotation failed: %w", err))
+				}
 			}
 			l.mu.Unlock()
+		case <-l.rotateCloseChan:
+			return
+		}
+	}
+}
+
+// timeRotationWorker triggers rotation at regular intervals if RotationTime is set
+func (l *Logger) timeRotationWorker(interval time.Duration) {
+	defer l.wg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			select {
+			case l.rotateChan <- struct{}{}:
+			default: // Avoid blocking if already queued
+			}
 		case <-l.rotateCloseChan:
 			return
 		}
@@ -585,35 +602,41 @@ func (l *Logger) log(level LogLevel, message string, skip int, fields map[string
 }
 
 func (l *Logger) rotateLogFiles() error {
-	// Check if rotation is needed by file size
+	if l.file == nil {
+		return fmt.Errorf("log file not open")
+	}
+
+	// Get current file info
 	fileInfo, err := l.file.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	if fileInfo.Size() < l.maxBytes && l.config.RotationTime == 0 {
-		return nil // No need to rotate
+	// Only skip rotation if both size threshold not met and rotation time not triggered
+	if fileInfo.Size() < l.maxBytes && l.config.RotationTime <= 0 {
+		return nil
 	}
 
-	if err := l.file.Close(); err != nil {
+	// Close current file
+	oldFile := l.file
+	if err := oldFile.Close(); err != nil {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
 
+	// Create rotated file name
 	base := strings.TrimSuffix(l.baseFilename, ".log")
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
+	// Rename current file
 	if err := os.Rename(l.baseFilename, backupPath); err != nil {
+		// Try to reopen original file if rename failed
+		file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if openErr != nil {
+			return fmt.Errorf("failed to rename log file (%v) and couldn't reopen original (%v)", err, openErr)
+		}
+		l.file = file
 		return fmt.Errorf("failed to rename log file: %w", err)
-	}
-
-	// Compress the backup if configured
-	if l.config.CompressBackups {
-		go func() {
-			if err := compressFile(backupPath); err != nil {
-				l.handleError(fmt.Errorf("failed to compress log file: %w", err))
-			}
-		}()
 	}
 
 	// Open new log file
@@ -622,6 +645,7 @@ func (l *Logger) rotateLogFiles() error {
 		return fmt.Errorf("failed to create new log file: %w", err)
 	}
 
+	// Update logger state
 	l.file = file
 	outputs := []io.Writer{os.Stdout, file}
 	if len(l.outputs) > 2 {
@@ -629,6 +653,15 @@ func (l *Logger) rotateLogFiles() error {
 	}
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
+
+	// Compress backup if configured
+	if l.config.CompressBackups {
+		go func() {
+			if err := compressFile(backupPath); err != nil {
+				l.handleError(fmt.Errorf("failed to compress log file: %w", err))
+			}
+		}()
+	}
 
 	l.cleanupOldBackups()
 	return nil
@@ -727,15 +760,23 @@ func (l *Logger) Close() error {
 		return nil
 	}
 
+	// Close channels first to stop workers
 	close(l.rotateCloseChan)
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
+
+	// Wait for all workers to finish
 	l.wg.Wait()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.file.Close()
+
+	// Close file last
+	if l.file != nil {
+		return l.file.Close()
+	}
+	return nil
 }
 
 // Basic log methods
