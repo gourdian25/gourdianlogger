@@ -52,24 +52,24 @@ type LoggerConfig struct {
 	Filename        string        `json:"filename"`         // Base filename for logs
 	MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
 	BackupCount     int           `json:"backup_count"`     // Number of backups to keep
-	LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
 	LogLevelStr     string        `json:"log_level"`        // Log level as string (for config)
 	TimestampFormat string        `json:"timestamp_format"` // Custom timestamp format
-	Outputs         []io.Writer   `json:"-"`                // Additional outputs
 	LogsDir         string        `json:"logs_dir"`         // Directory for log files
 	EnableCaller    bool          `json:"enable_caller"`    // Include caller info
 	BufferSize      int           `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int           `json:"async_workers"`    // Number of async workers
-	Format          LogFormat     `json:"-"`                // Log message format (internal use)
 	FormatStr       string        `json:"format"`           // Format as string (for config)
 	FormatConfig    FormatConfig  `json:"format_config"`    // Format-specific config
 	EnableFallback  bool          `json:"enable_fallback"`  // Whether to use fallback logging
-	ErrorHandler    func(error)   `json:"-"`                // Custom error handler
 	MaxLogRate      int           `json:"max_log_rate"`     // Max logs per second (0 for unlimited)
 	CompressBackups bool          `json:"compress_backups"` // Whether to gzip rotated logs
 	RotationTime    time.Duration `json:"rotation_time"`    // Time-based rotation interval
 	SampleRate      int           `json:"sample_rate"`      // Log sampling rate (1 in N)
 	CallerDepth     int           `json:"caller_depth"`     // How many stack frames to skip
+	LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
+	Outputs         []io.Writer   `json:"-"`                // Additional outputs
+	Format          LogFormat     `json:"-"`                // Log message format (internal use)
+	ErrorHandler    func(error)   `json:"-"`                // Custom error handler
 }
 
 // FormatConfig contains format-specific configuration
