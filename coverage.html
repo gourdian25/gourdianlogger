@@ -1,0 +1,1071 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>gourdianlogger: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.3%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package gourdianlogger
+
+import (
+        "bytes"
+        "compress/gzip"
+        "encoding/json"
+        "fmt"
+        "io"
+        "math/rand"
+        "os"
+        "path/filepath"
+        "runtime"
+        "sort"
+        "strconv"
+        "strings"
+        "sync"
+        "sync/atomic"
+        "time"
+
+        "golang.org/x/time/rate"
+)
+
+// LogLevel represents the severity level of log messages
+type LogLevel int32
+
+const (
+        DEBUG LogLevel = iota
+        INFO
+        WARN
+        ERROR
+        FATAL
+)
+
+// LogFormat represents the format of log messages
+type LogFormat int
+
+const (
+        FormatPlain LogFormat = iota // Default plain text format
+        FormatJSON                   // JSON format
+)
+
+var (
+        defaultMaxBytes        int64  = 10 * 1024 * 1024 // 10MB
+        defaultBackupCount     int    = 5
+        defaultTimestampFormat string = "2006-01-02 15:04:05.000000"
+        defaultLogsDir         string = "logs"
+)
+
+// LoggerConfig holds configuration for the logger
+// LoggerConfig holds configuration for the logger
+type LoggerConfig struct {
+        Filename        string        `json:"filename"`         // Base filename for logs
+        MaxBytes        int64         `json:"max_bytes"`        // Max file size before rotation
+        BackupCount     int           `json:"backup_count"`     // Number of backups to keep
+        LogLevel        LogLevel      `json:"-"`                // Minimum log level (internal use)
+        LogLevelStr     string        `json:"log_level"`        // Log level as string (for config)
+        TimestampFormat string        `json:"timestamp_format"` // Custom timestamp format
+        Outputs         []io.Writer   `json:"-"`                // Additional outputs
+        LogsDir         string        `json:"logs_dir"`         // Directory for log files
+        EnableCaller    bool          `json:"enable_caller"`    // Include caller info
+        BufferSize      int           `json:"buffer_size"`      // Buffer size for async logging
+        AsyncWorkers    int           `json:"async_workers"`    // Number of async workers
+        Format          LogFormat     `json:"-"`                // Log message format (internal use)
+        FormatStr       string        `json:"format"`           // Format as string (for config)
+        FormatConfig    FormatConfig  `json:"format_config"`    // Format-specific config
+        EnableFallback  bool          `json:"enable_fallback"`  // Whether to use fallback logging
+        ErrorHandler    func(error)   `json:"-"`                // Custom error handler
+        MaxLogRate      int           `json:"max_log_rate"`     // Max logs per second (0 for unlimited)
+        CompressBackups bool          `json:"compress_backups"` // Whether to gzip rotated logs
+        RotationTime    time.Duration `json:"rotation_time"`    // Time-based rotation interval
+        SampleRate      int           `json:"sample_rate"`      // Log sampling rate (1 in N)
+        CallerDepth     int           `json:"caller_depth"`     // How many stack frames to skip
+}
+
+// FormatConfig contains format-specific configuration
+type FormatConfig struct {
+        PrettyPrint  bool                   `json:"pretty_print"`  // For human-readable JSON
+        CustomFields map[string]interface{} `json:"custom_fields"` // Custom fields to include
+}
+
+// Logger is the main logging struct
+type Logger struct {
+        mu              sync.RWMutex
+        level           atomic.Int32
+        baseFilename    string
+        maxBytes        int64
+        backupCount     int
+        file            *os.File
+        multiWriter     io.Writer
+        bufferPool      sync.Pool
+        timestampFormat string
+        outputs         []io.Writer
+        logsDir         string
+        closed          atomic.Bool
+        rotateChan      chan struct{}
+        rotateCloseChan chan struct{}
+        wg              sync.WaitGroup
+        enableCaller    bool
+        asyncQueue      chan *logEntry
+        asyncCloseChan  chan struct{}
+        asyncWorkers    int
+        format          LogFormat
+        formatConfig    FormatConfig
+        fallbackWriter  io.Writer
+        errorHandler    func(error)
+        rateLimiter     *rate.Limiter
+        config          LoggerConfig
+        dynamicLevelFn  func() LogLevel
+}
+
+type logEntry struct {
+        level      LogLevel
+        message    string
+        callerInfo string
+        fields     map[string]interface{}
+}
+
+func (l LogLevel) String() string <span class="cov8" title="1">{
+        return [...]string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"}[l]
+}</span>
+
+func ParseLogLevel(level string) (LogLevel, error) <span class="cov8" title="1">{
+        switch strings.ToUpper(level) </span>{
+        case "DEBUG":<span class="cov8" title="1">
+                return DEBUG, nil</span>
+        case "INFO":<span class="cov8" title="1">
+                return INFO, nil</span>
+        case "WARN", "WARNING":<span class="cov8" title="1">
+                return WARN, nil</span>
+        case "ERROR":<span class="cov8" title="1">
+                return ERROR, nil</span>
+        case "FATAL":<span class="cov8" title="1">
+                return FATAL, nil</span>
+        default:<span class="cov8" title="1">
+                return DEBUG, fmt.Errorf("invalid log level: %s", level)</span>
+        }
+}
+
+func DefaultConfig() LoggerConfig <span class="cov8" title="1">{
+        return LoggerConfig{
+                Filename:        "app",
+                MaxBytes:        defaultMaxBytes,
+                BackupCount:     defaultBackupCount,
+                LogLevel:        DEBUG,
+                TimestampFormat: defaultTimestampFormat,
+                LogsDir:         defaultLogsDir,
+                EnableCaller:    true,
+                BufferSize:      0, // Sync by default
+                AsyncWorkers:    1,
+                Format:          FormatPlain,
+                FormatConfig:    FormatConfig{},
+                EnableFallback:  true,
+                MaxLogRate:      0, // Unlimited by default
+                CompressBackups: false,
+                RotationTime:    0, // No time-based rotation by default
+                SampleRate:      1, // No sampling by default
+                CallerDepth:     3, // Default skip 3 frames
+        }
+}</span>
+
+func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" title="1">{
+        // Apply environment variable overrides
+        config.ApplyEnvOverrides()
+
+        // Validate configuration
+        if err := config.Validate(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("invalid config: %w", err)
+        }</span>
+
+        // Set defaults
+        <span class="cov8" title="1">if config.MaxBytes &lt;= 0 </span><span class="cov8" title="1">{
+                config.MaxBytes = defaultMaxBytes
+        }</span>
+        <span class="cov8" title="1">if config.BackupCount &lt;= 0 </span><span class="cov8" title="1">{
+                config.BackupCount = defaultBackupCount
+        }</span>
+        <span class="cov8" title="1">if config.TimestampFormat == "" </span><span class="cov8" title="1">{
+                config.TimestampFormat = defaultTimestampFormat
+        }</span>
+        <span class="cov8" title="1">if config.LogsDir == "" </span><span class="cov0" title="0">{
+                config.LogsDir = defaultLogsDir
+        }</span>
+        <span class="cov8" title="1">if config.Filename == "" </span><span class="cov0" title="0">{
+                config.Filename = "app"
+        }</span>
+        <span class="cov8" title="1">if config.AsyncWorkers &lt;= 0 &amp;&amp; config.BufferSize &gt; 0 </span><span class="cov0" title="0">{
+                config.AsyncWorkers = 1
+        }</span>
+        <span class="cov8" title="1">if config.CallerDepth &lt;= 0 </span><span class="cov0" title="0">{
+                config.CallerDepth = 3
+        }</span>
+
+        <span class="cov8" title="1">config.Filename = strings.TrimSpace(strings.TrimSuffix(config.Filename, ".log"))
+        if err := os.MkdirAll(config.LogsDir, 0755); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to create log directory: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">logPath := filepath.Join(config.LogsDir, config.Filename+".log")
+        file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to open log file: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">outputs := []io.Writer{file, os.Stdout}
+        if config.Outputs != nil </span><span class="cov8" title="1">{
+                outputs = append(outputs, config.Outputs...)
+        }</span>
+        <span class="cov8" title="1">validOutputs := make([]io.Writer, 0, len(outputs))
+        for _, w := range outputs </span><span class="cov8" title="1">{
+                if w != nil </span><span class="cov8" title="1">{
+                        validOutputs = append(validOutputs, w)
+                }</span>
+        }
+
+        <span class="cov8" title="1">logger := &amp;Logger{
+                baseFilename:    logPath,
+                maxBytes:        config.MaxBytes,
+                backupCount:     config.BackupCount,
+                file:            file,
+                timestampFormat: config.TimestampFormat,
+                outputs:         validOutputs,
+                logsDir:         config.LogsDir,
+                rotateChan:      make(chan struct{}, 1),
+                rotateCloseChan: make(chan struct{}),
+                enableCaller:    config.EnableCaller,
+                asyncWorkers:    config.AsyncWorkers,
+                format:          config.Format,
+                formatConfig:    config.FormatConfig,
+                errorHandler:    config.ErrorHandler,
+                config:          config,
+        }
+
+        // Initialize fallback writer if enabled
+        if config.EnableFallback </span><span class="cov8" title="1">{
+                logger.fallbackWriter = os.Stderr
+        }</span>
+
+        // Initialize rate limiter if configured
+        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
+                logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
+        }</span>
+
+        <span class="cov8" title="1">logger.level.Store(int32(config.LogLevel))
+        logger.multiWriter = io.MultiWriter(validOutputs...)
+        logger.bufferPool.New = func() interface{} </span><span class="cov8" title="1">{
+                return new(bytes.Buffer)
+        }</span>
+
+        // Start file size-based rotation worker
+        <span class="cov8" title="1">logger.wg.Add(1)
+        go logger.fileSizeRotationWorker()
+
+        // Start time-based rotation worker only if enabled
+        if config.RotationTime &gt; 0 </span><span class="cov0" title="0">{
+                logger.wg.Add(1)
+                go logger.timeRotationWorker(config.RotationTime)
+        }</span>
+
+        // Initialize async logging if configured
+        <span class="cov8" title="1">if config.BufferSize &gt; 0 </span><span class="cov8" title="1">{
+                logger.asyncQueue = make(chan *logEntry, config.BufferSize)
+                logger.asyncCloseChan = make(chan struct{})
+
+                for i := 0; i &lt; logger.asyncWorkers; i++ </span><span class="cov8" title="1">{
+                        logger.wg.Add(1)
+                        go logger.asyncWorker()
+                }</span>
+        }
+
+        <span class="cov8" title="1">return logger, nil</span>
+}
+
+// Validate checks the LoggerConfig for valid values
+func (lc *LoggerConfig) Validate() error <span class="cov8" title="1">{
+        if lc.MaxBytes &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("MaxBytes cannot be negative")
+        }</span>
+        <span class="cov8" title="1">if lc.BackupCount &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("BackupCount cannot be negative")
+        }</span>
+        <span class="cov8" title="1">if lc.BufferSize &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("BufferSize cannot be negative")
+        }</span>
+        <span class="cov8" title="1">if lc.AsyncWorkers &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("AsyncWorkers cannot be negative")
+        }</span>
+        <span class="cov8" title="1">if lc.MaxLogRate &lt; 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("MaxLogRate cannot be negative")
+        }</span>
+        <span class="cov8" title="1">if lc.SampleRate &lt; 1 </span><span class="cov0" title="0">{
+                return fmt.Errorf("SampleRate must be at least 1")
+        }</span>
+        <span class="cov8" title="1">if lc.CallerDepth &lt; 1 </span><span class="cov0" title="0">{
+                return fmt.Errorf("CallerDepth must be at least 1")
+        }</span>
+
+        // Validate log level if specified
+        <span class="cov8" title="1">if lc.LogLevelStr != "" </span><span class="cov0" title="0">{
+                if _, err := ParseLogLevel(lc.LogLevelStr); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("invalid log level: %w", err)
+                }</span>
+        }
+
+        // Validate format if specified
+        <span class="cov8" title="1">if lc.FormatStr != "" </span><span class="cov0" title="0">{
+                switch strings.ToUpper(lc.FormatStr) </span>{
+                case "PLAIN", "JSON":<span class="cov0" title="0"></span>
+                        // valid
+                default:<span class="cov0" title="0">
+                        return fmt.Errorf("invalid log format: %s", lc.FormatStr)</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// Complete initializes the internal fields from string representations
+func (lc *LoggerConfig) Complete() error <span class="cov0" title="0">{
+        // Parse log level
+        if lc.LogLevelStr != "" </span><span class="cov0" title="0">{
+                level, err := ParseLogLevel(lc.LogLevelStr)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("invalid log level: %w", err)
+                }</span>
+                <span class="cov0" title="0">lc.LogLevel = level</span>
+        } else<span class="cov0" title="0"> {
+                lc.LogLevel = DEBUG // default
+        }</span>
+
+        // Parse format
+        <span class="cov0" title="0">if lc.FormatStr != "" </span><span class="cov0" title="0">{
+                switch strings.ToUpper(lc.FormatStr) </span>{
+                case "PLAIN":<span class="cov0" title="0">
+                        lc.Format = FormatPlain</span>
+                case "JSON":<span class="cov0" title="0">
+                        lc.Format = FormatJSON</span>
+                default:<span class="cov0" title="0">
+                        return fmt.Errorf("invalid log format: %s", lc.FormatStr)</span>
+                }
+        } else<span class="cov0" title="0"> {
+                lc.Format = FormatPlain // default
+        }</span>
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+// ApplyEnvOverrides applies environment variable overrides to the config
+func (lc *LoggerConfig) ApplyEnvOverrides() <span class="cov8" title="1">{
+        if dir := os.Getenv("LOG_DIR"); dir != "" </span><span class="cov8" title="1">{
+                lc.LogsDir = dir
+        }</span>
+        <span class="cov8" title="1">if level := os.Getenv("LOG_LEVEL"); level != "" </span><span class="cov8" title="1">{
+                lc.LogLevelStr = level
+        }</span>
+        <span class="cov8" title="1">if format := os.Getenv("LOG_FORMAT"); format != "" </span><span class="cov8" title="1">{
+                lc.FormatStr = format
+        }</span>
+        <span class="cov8" title="1">if rate := os.Getenv("LOG_RATE"); rate != "" </span><span class="cov8" title="1">{
+                if r, err := strconv.Atoi(rate); err == nil </span><span class="cov8" title="1">{
+                        lc.MaxLogRate = r
+                }</span>
+        }
+}
+
+// NewGourdianLoggerWithDefault initializes a logger with DefaultConfig values
+func NewGourdianLoggerWithDefault() (*Logger, error) <span class="cov0" title="0">{
+        config := DefaultConfig()
+        return NewGourdianLogger(config)
+}</span>
+
+// fileSizeRotationWorker listens for manual rotation triggers (e.g., after write or on demand)
+func (l *Logger) fileSizeRotationWorker() <span class="cov8" title="1">{
+        defer l.wg.Done()
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-l.rotateChan:<span class="cov0" title="0">
+                        l.mu.Lock()
+                        if l.file != nil </span><span class="cov0" title="0">{
+                                if err := l.rotateLogFiles(); err != nil </span><span class="cov0" title="0">{
+                                        l.handleError(fmt.Errorf("log rotation failed: %w", err))
+                                }</span>
+                        }
+                        <span class="cov0" title="0">l.mu.Unlock()</span>
+                case &lt;-l.rotateCloseChan:<span class="cov8" title="1">
+                        return</span>
+                }
+        }
+}
+
+// timeRotationWorker triggers rotation at regular intervals if RotationTime is set
+func (l *Logger) timeRotationWorker(interval time.Duration) <span class="cov0" title="0">{
+        defer l.wg.Done()
+        ticker := time.NewTicker(interval)
+        defer ticker.Stop()
+
+        for </span><span class="cov0" title="0">{
+                select </span>{
+                case &lt;-ticker.C:<span class="cov0" title="0">
+                        l.mu.Lock()
+                        if l.file != nil </span><span class="cov0" title="0">{
+                                if err := l.rotateLogFiles(); err != nil </span><span class="cov0" title="0">{
+                                        l.handleError(fmt.Errorf("time-based log rotation failed: %w", err))
+                                }</span>
+                        }
+                        <span class="cov0" title="0">l.mu.Unlock()</span>
+                case &lt;-l.rotateCloseChan:<span class="cov0" title="0">
+                        return</span>
+                }
+        }
+}
+
+func (l *Logger) asyncWorker() <span class="cov8" title="1">{
+        defer l.wg.Done()
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case entry := &lt;-l.asyncQueue:<span class="cov8" title="1">
+                        l.processLogEntry(entry.level, entry.message, entry.callerInfo, entry.fields)</span>
+                case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
+                        // Drain the queue before exiting
+                        for </span><span class="cov8" title="1">{
+                                select </span>{
+                                case entry := &lt;-l.asyncQueue:<span class="cov0" title="0">
+                                        l.processLogEntry(entry.level, entry.message, entry.callerInfo, entry.fields)</span>
+                                default:<span class="cov8" title="1">
+                                        return</span>
+                                }
+                        }
+                }
+        }
+}
+
+func (l *Logger) handleError(err error) <span class="cov8" title="1">{
+        if l.errorHandler != nil </span><span class="cov8" title="1">{
+                l.errorHandler(err)
+        }</span> else<span class="cov0" title="0"> if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(l.fallbackWriter, "LOGGER ERROR: %v\n", err)
+        }</span>
+}
+
+func (l *Logger) processLogEntry(level LogLevel, message string, callerInfo string, fields map[string]interface{}) <span class="cov8" title="1">{
+        currentLevel := l.GetLogLevel()
+        if l.dynamicLevelFn != nil </span><span class="cov8" title="1">{
+                currentLevel = l.dynamicLevelFn()
+        }</span>
+
+        <span class="cov8" title="1">if level &lt; currentLevel </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        // Apply sampling if configured
+        <span class="cov8" title="1">if l.config.SampleRate &gt; 1 &amp;&amp; rand.Intn(l.config.SampleRate) != 0 </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">buf := l.bufferPool.Get().(*bytes.Buffer)
+        buf.Reset()
+        defer l.bufferPool.Put(buf)
+
+        buf.WriteString(l.formatMessage(level, message, callerInfo, fields))
+
+        l.mu.Lock()
+        defer l.mu.Unlock()
+
+        if l.closed.Load() </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
+                return
+        }</span>
+
+        <span class="cov8" title="1">if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov8" title="1">{
+                l.handleError(fmt.Errorf("log write error: %w", err))
+                if l.fallbackWriter != nil </span><span class="cov8" title="1">{
+                        fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
+                }</span>
+        }
+
+        <span class="cov8" title="1">if level == FATAL </span><span class="cov8" title="1">{
+                os.Exit(1)
+        }</span>
+}
+
+func (l *Logger) formatPlain(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string <span class="cov8" title="1">{
+        levelStr := fmt.Sprintf("[%s]", level.String())
+        timestampStr := time.Now().Format(l.timestampFormat)
+
+        var builder strings.Builder
+        builder.WriteString(timestampStr)
+        builder.WriteString(" ")
+        builder.WriteString(levelStr)
+        builder.WriteString(" ")
+
+        if callerInfo != "" </span><span class="cov8" title="1">{
+                builder.WriteString(callerInfo)
+                builder.WriteString(":")
+        }</span>
+
+        <span class="cov8" title="1">builder.WriteString(message)
+
+        // Add fields if present
+        if len(fields) &gt; 0 </span><span class="cov8" title="1">{
+                builder.WriteString(" {")
+                first := true
+                for k, v := range fields </span><span class="cov8" title="1">{
+                        if !first </span><span class="cov0" title="0">{
+                                builder.WriteString(", ")
+                        }</span>
+                        <span class="cov8" title="1">first = false
+                        builder.WriteString(k)
+                        builder.WriteString("=")
+                        builder.WriteString(fmt.Sprintf("%v", v))</span>
+                }
+                <span class="cov8" title="1">builder.WriteString("}")</span>
+        }
+
+        <span class="cov8" title="1">builder.WriteString("\n")
+        return builder.String()</span>
+}
+
+func (l *Logger) formatJSON(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string <span class="cov8" title="1">{
+        logEntry := map[string]interface{}{
+                "timestamp": time.Now().Format(l.timestampFormat),
+                "level":     level.String(),
+                "message":   message,
+        }
+
+        if l.enableCaller &amp;&amp; callerInfo != "" </span><span class="cov8" title="1">{
+                logEntry["caller"] = callerInfo
+        }</span>
+
+        // Add custom fields from format config
+        <span class="cov8" title="1">for k, v := range l.formatConfig.CustomFields </span><span class="cov8" title="1">{
+                logEntry[k] = v
+        }</span>
+
+        // Add log-specific fields
+        <span class="cov8" title="1">for k, v := range fields </span><span class="cov8" title="1">{
+                logEntry[k] = v
+        }</span>
+
+        <span class="cov8" title="1">var jsonData []byte
+        var err error
+
+        if l.formatConfig.PrettyPrint </span><span class="cov8" title="1">{
+                jsonData, err = json.MarshalIndent(logEntry, "", "  ")
+        }</span> else<span class="cov8" title="1"> {
+                jsonData, err = json.Marshal(logEntry)
+        }</span>
+
+        <span class="cov8" title="1">if err != nil </span><span class="cov0" title="0">{
+                return fmt.Sprintf(`{"error":"failed to marshal log entry: %v"}`+"\n", err)
+        }</span>
+        <span class="cov8" title="1">return string(jsonData) + "\n"</span>
+}
+
+func (l *Logger) getCallerInfo(skip int) string <span class="cov8" title="1">{
+        pc, file, line, ok := runtime.Caller(skip)
+        if !ok </span><span class="cov0" title="0">{
+                return ""
+        }</span>
+
+        <span class="cov8" title="1">fileName := filepath.Base(file)
+        fn := runtime.FuncForPC(pc)
+        if fn == nil </span><span class="cov0" title="0">{
+                return fmt.Sprintf("%s:%d", fileName, line)
+        }</span>
+
+        <span class="cov8" title="1">fullFnName := fn.Name()
+        if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash &gt;= 0 </span><span class="cov8" title="1">{
+                fullFnName = fullFnName[lastSlash+1:]
+        }</span>
+
+        <span class="cov8" title="1">return fmt.Sprintf("%s:%d:%s", fileName, line, fullFnName)</span>
+}
+
+func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string, fields map[string]interface{}) string <span class="cov8" title="1">{
+        switch l.format </span>{
+        case FormatJSON:<span class="cov8" title="1">
+                return l.formatJSON(level, message, callerInfo, fields)</span>
+        default:<span class="cov8" title="1">
+                return l.formatPlain(level, message, callerInfo, fields)</span>
+        }
+}
+
+func (l *Logger) log(level LogLevel, message string, skip int, fields map[string]interface{}) <span class="cov8" title="1">{
+        // Apply rate limiting if configured
+        if l.rateLimiter != nil &amp;&amp; !l.rateLimiter.Allow() </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">var callerInfo string
+        if l.enableCaller </span><span class="cov8" title="1">{
+                callerInfo = l.getCallerInfo(skip)
+        }</span>
+
+        <span class="cov8" title="1">if l.asyncQueue != nil </span><span class="cov8" title="1">{
+                select </span>{
+                case l.asyncQueue &lt;- &amp;logEntry{level, message, callerInfo, fields}:<span class="cov8" title="1"></span>
+                default:<span class="cov8" title="1">
+                        // If queue is full, process synchronously
+                        l.processLogEntry(level, message, callerInfo, fields)</span>
+                }
+        } else<span class="cov8" title="1"> {
+                l.processLogEntry(level, message, callerInfo, fields)
+        }</span>
+}
+
+func (l *Logger) rotateLogFiles() error <span class="cov8" title="1">{
+        t := time.Now()
+        defer func() </span><span class="cov8" title="1">{
+                l.Debugf("rotateLogFiles completed in %v", time.Since(t))
+        }</span>()
+
+        <span class="cov8" title="1">if l.file == nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("log file not open")
+        }</span>
+
+        // Get current file info
+        <span class="cov8" title="1">fileInfo, err := l.file.Stat()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to get file info: %w", err)
+        }</span>
+
+        // Only skip rotation if both size threshold not met and rotation time not triggered
+        <span class="cov8" title="1">if fileInfo.Size() &lt; l.maxBytes &amp;&amp; l.config.RotationTime &lt;= 0 </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+
+        // Close current file
+        <span class="cov8" title="1">oldFile := l.file
+        if err := oldFile.Close(); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to close log file: %w", err)
+        }</span>
+
+        // Create rotated file name
+        <span class="cov8" title="1">base := strings.TrimSuffix(l.baseFilename, ".log")
+        timestamp := time.Now().Format("20060102_150405")
+        backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
+
+        // Rename current file
+        if err := os.Rename(l.baseFilename, backupPath); err != nil </span><span class="cov0" title="0">{
+                // Try to reopen original file if rename failed
+                file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+                if openErr != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to rename log file (%v) and couldn't reopen original (%v)", err, openErr)
+                }</span>
+                <span class="cov0" title="0">l.file = file
+                return fmt.Errorf("failed to rename log file: %w", err)</span>
+        }
+
+        // Open new log file
+        <span class="cov8" title="1">file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create new log file: %w", err)
+        }</span>
+
+        // Update logger state
+        <span class="cov8" title="1">l.file = file
+        outputs := []io.Writer{os.Stdout, file}
+        if len(l.outputs) &gt; 2 </span><span class="cov0" title="0">{
+                outputs = append(outputs, l.outputs[2:]...)
+        }</span>
+        <span class="cov8" title="1">l.outputs = outputs
+        l.multiWriter = io.MultiWriter(outputs...)
+
+        // Compress backup if configured
+        if l.config.CompressBackups </span><span class="cov0" title="0">{
+                go func() </span><span class="cov0" title="0">{
+                        if err := compressFile(backupPath); err != nil </span><span class="cov0" title="0">{
+                                l.handleError(fmt.Errorf("failed to compress log file: %w", err))
+                        }</span>
+                }()
+        }
+
+        <span class="cov8" title="1">l.cleanupOldBackups()
+        return nil</span>
+}
+
+func compressFile(path string) error <span class="cov0" title="0">{
+        src, err := os.Open(path)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">defer src.Close()
+
+        dst, err := os.Create(path + ".gz")
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">defer dst.Close()
+
+        gz := gzip.NewWriter(dst)
+        defer gz.Close()
+
+        if _, err := io.Copy(gz, src); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // Remove original file after successful compression
+        <span class="cov0" title="0">return os.Remove(path)</span>
+}
+
+func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
+        pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log*"
+        files, err := filepath.Glob(pattern)
+        if err != nil || len(files) &lt;= l.backupCount </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        // Sort files by modification time (oldest first)
+        <span class="cov0" title="0">sort.Slice(files, func(i, j int) bool </span><span class="cov0" title="0">{
+                info1, _ := os.Stat(files[i])
+                info2, _ := os.Stat(files[j])
+                return info1.ModTime().Before(info2.ModTime())
+        }</span>)
+
+        <span class="cov0" title="0">for _, f := range files[:len(files)-l.backupCount] </span><span class="cov0" title="0">{
+                _ = os.Remove(f)
+        }</span>
+}
+
+func (l *Logger) SetLogLevel(level LogLevel) <span class="cov8" title="1">{
+        l.level.Store(int32(level))
+}</span>
+
+func (l *Logger) GetLogLevel() LogLevel <span class="cov8" title="1">{
+        return LogLevel(l.level.Load())
+}</span>
+
+func (l *Logger) SetDynamicLevelFunc(fn func() LogLevel) <span class="cov8" title="1">{
+        l.dynamicLevelFn = fn
+}</span>
+
+func (l *Logger) AddOutput(output io.Writer) <span class="cov8" title="1">{
+        if output == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">l.mu.Lock()
+        defer l.mu.Unlock()
+
+        if l.closed.Load() </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">l.outputs = append(l.outputs, output)
+        l.multiWriter = io.MultiWriter(l.outputs...)</span>
+}
+
+func (l *Logger) RemoveOutput(output io.Writer) <span class="cov8" title="1">{
+        l.mu.Lock()
+        defer l.mu.Unlock()
+
+        if l.closed.Load() </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">for i, w := range l.outputs </span><span class="cov8" title="1">{
+                if w == output </span><span class="cov8" title="1">{
+                        l.outputs = append(l.outputs[:i], l.outputs[i+1:]...)
+                        l.multiWriter = io.MultiWriter(l.outputs...)
+                        return
+                }</span>
+        }
+}
+
+func (l *Logger) Close() error <span class="cov8" title="1">{
+        if !l.closed.CompareAndSwap(false, true) </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        // Close channels first to stop workers
+        <span class="cov8" title="1">close(l.rotateCloseChan)
+        if l.asyncCloseChan != nil </span><span class="cov8" title="1">{
+                close(l.asyncCloseChan)
+        }</span>
+
+        // Wait for all workers to finish
+        <span class="cov8" title="1">l.wg.Wait()
+
+        l.mu.Lock()
+        defer l.mu.Unlock()
+
+        // Close file last
+        if l.file != nil </span><span class="cov8" title="1">{
+                return l.file.Close()
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+// Basic log methods
+func (l *Logger) Debug(v ...interface{}) <span class="cov8" title="1">{
+        l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Info(v ...interface{}) <span class="cov8" title="1">{
+        l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Warn(v ...interface{}) <span class="cov8" title="1">{
+        l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Error(v ...interface{}) <span class="cov8" title="1">{
+        l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Fatal(v ...interface{}) <span class="cov8" title="1">{
+        l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, nil)
+        l.Flush()
+        os.Exit(1)
+}</span>
+
+// Formatted log methods
+func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov8" title="1">{
+        l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Infof(format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
+}</span>
+
+func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, nil)
+        l.Flush()
+        os.Exit(1)
+}</span>
+
+// Structured logging methods
+func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+        l.log(DEBUG, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
+        l.log(INFO, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+        l.log(WARN, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+        l.log(ERROR, fmt.Sprint(v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+        l.log(FATAL, fmt.Sprint(v...), l.config.CallerDepth, fields)
+        l.Flush()
+        os.Exit(1)
+}</span>
+
+func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(DEBUG, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(INFO, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(WARN, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(ERROR, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+}</span>
+
+func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+        l.log(FATAL, fmt.Sprintf(format, v...), l.config.CallerDepth, fields)
+        l.Flush()
+        os.Exit(1)
+}</span>
+
+// Flush ensures all buffered logs are written
+func (l *Logger) Flush() <span class="cov8" title="1">{
+        if l.asyncQueue != nil </span><span class="cov8" title="1">{
+                for len(l.asyncQueue) &gt; 0 </span><span class="cov8" title="1">{
+                        time.Sleep(10 * time.Millisecond)
+                }</span>
+        }
+}
+
+// IsClosed returns whether the logger has been closed
+func (l *Logger) IsClosed() bool <span class="cov0" title="0">{
+        return l.closed.Load()
+}</span>
+
+// WithConfig creates a logger from JSON configuration
+func WithConfig(jsonConfig string) (*Logger, error) <span class="cov8" title="1">{
+        if !json.Valid([]byte(jsonConfig)) </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("invalid JSON config")
+        }</span>
+
+        <span class="cov8" title="1">var config LoggerConfig
+        if err := json.Unmarshal([]byte(jsonConfig), &amp;config); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("invalid config: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if config.LogsDir == "" </span><span class="cov0" title="0">{
+                config.LogsDir = defaultLogsDir
+        }</span>
+
+        <span class="cov8" title="1">if err := os.MkdirAll(config.LogsDir, 0755); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to create log directory '%s': %w", config.LogsDir, err)
+        }</span>
+
+        <span class="cov8" title="1">return NewGourdianLogger(config)</span>
+}
+
+func (lc *LoggerConfig) UnmarshalJSON(data []byte) error <span class="cov8" title="1">{
+        type Alias LoggerConfig
+        aux := &amp;struct {
+                LogLevelStr string `json:"log_level"`
+                FormatStr   string `json:"format"`
+                *Alias
+        }{
+                Alias: (*Alias)(lc),
+        }
+
+        if string(data) == "{}" </span><span class="cov8" title="1">{
+                *lc = DefaultConfig()
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">if err := json.Unmarshal(data, &amp;aux); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">if aux.LogLevelStr == "" </span><span class="cov8" title="1">{
+                lc.LogLevel = DEBUG
+        }</span> else<span class="cov8" title="1"> {
+                level, err := ParseLogLevel(aux.LogLevelStr)
+                if err != nil </span><span class="cov8" title="1">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">lc.LogLevel = level</span>
+        }
+
+        <span class="cov8" title="1">if aux.FormatStr == "" </span><span class="cov8" title="1">{
+                lc.Format = FormatPlain
+        }</span> else<span class="cov8" title="1"> {
+                switch strings.ToUpper(aux.FormatStr) </span>{
+                case "PLAIN":<span class="cov0" title="0">
+                        lc.Format = FormatPlain</span>
+                case "JSON":<span class="cov8" title="1">
+                        lc.Format = FormatJSON</span>
+                default:<span class="cov8" title="1">
+                        return fmt.Errorf("invalid log format: %s", aux.FormatStr)</span>
+                }
+        }
+
+        // Set defaults for required fields if not provided
+        <span class="cov8" title="1">if lc.CallerDepth == 0 </span><span class="cov8" title="1">{
+                lc.CallerDepth = 3 // Default value
+        }</span>
+        <span class="cov8" title="1">if lc.SampleRate &lt; 1 </span><span class="cov8" title="1">{
+                lc.SampleRate = 1
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

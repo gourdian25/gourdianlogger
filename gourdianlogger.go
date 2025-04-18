@@ -396,10 +396,13 @@ func (l *Logger) timeRotationWorker(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			select {
-			case l.rotateChan <- struct{}{}:
-			default: // Avoid blocking if already queued
+			l.mu.Lock()
+			if l.file != nil {
+				if err := l.rotateLogFiles(); err != nil {
+					l.handleError(fmt.Errorf("time-based log rotation failed: %w", err))
+				}
 			}
+			l.mu.Unlock()
 		case <-l.rotateCloseChan:
 			return
 		}
@@ -602,6 +605,11 @@ func (l *Logger) log(level LogLevel, message string, skip int, fields map[string
 }
 
 func (l *Logger) rotateLogFiles() error {
+	t := time.Now()
+	defer func() {
+		l.Debugf("rotateLogFiles completed in %v", time.Since(t))
+	}()
+
 	if l.file == nil {
 		return fmt.Errorf("log file not open")
 	}

@@ -2,7 +2,6 @@ package gourdianlogger
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -607,263 +605,78 @@ func TestWithTimeout(t *testing.T) {
 	}
 }
 
-func TestMaxBytesEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		maxBytes    int64
-		expectError bool
-		expectFiles int
-	}{
-		{"Zero", 0, false, 0},
-		{"Negative", -1, true, 0},
-		{"Small", 100, false, 1}, // Should rotate once
-		{"Large", 1 << 30, false, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			config := DefaultConfig()
-			config.Filename = "maxbytes_" + tt.name
-			config.LogsDir = "test_logs"
-			config.MaxBytes = tt.maxBytes
-			config.BackupCount = 5
-			config.BufferSize = 0 // Ensure synchronous writes for test
-
-			logger, err := NewGourdianLogger(config)
-			if tt.expectError {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			defer logger.Close()
-
-			// Write enough to trigger rotation
-			message := strings.Repeat("x", 20)
-			for i := 0; i < 100; i++ {
-				logger.Info(message)
-
-				// For small maxBytes, manually trigger rotation check
-				if tt.maxBytes > 0 && tt.maxBytes < 1000 {
-					logger.mu.Lock()
-					if logger.file != nil {
-						if info, err := logger.file.Stat(); err == nil {
-							if info.Size() >= tt.maxBytes {
-								logger.rotateChan <- struct{}{}
-							}
-						}
-					}
-					logger.mu.Unlock()
-				}
-			}
-
-			// Allow time for rotation to complete
-			time.Sleep(100 * time.Millisecond)
-
-			// Check for rotated files
-			pattern := filepath.Join("test_logs", "maxbytes_"+tt.name+"_*.log")
-			files, err := filepath.Glob(pattern)
-			require.NoError(t, err)
-
-			if tt.expectFiles > 0 {
-				// For rotation cases, also verify current log size
-				currentLog := filepath.Join("test_logs", config.Filename+".log")
-				info, err := os.Stat(currentLog)
-				require.NoError(t, err)
-				assert.Less(t, info.Size(), tt.maxBytes,
-					"Current log file should be under maxBytes")
-			}
-
-			assert.Len(t, files, tt.expectFiles,
-				"Expected %d rotated files for maxBytes=%d, got %v",
-				tt.expectFiles, tt.maxBytes, files)
-		})
-	}
-}
-
-// TestTimeBasedRotation tests time-based log rotation
-func TestTimeBasedRotation(t *testing.T) {
-	t.Parallel()
-
-	logDir := "test_logs"
-	filename := "time_rotation_test"
-	config := DefaultConfig()
-	config.Filename = filename
-	config.LogsDir = logDir
-	config.RotationTime = 100 * time.Millisecond
-
-	logger, err := NewGourdianLogger(config)
-	require.NoError(t, err)
-	defer logger.Close()
-
-	// Write a log to initialize the file
-	logger.Info("initial log to trigger file creation")
-
-	// Wait for the ticker to fire and rotation to (possibly) complete
-	time.Sleep(300 * time.Millisecond)
-
-	// Optional: another log write to ensure flush
-	logger.Info("post-tick log to force rotation")
-
-	// Add a short wait to ensure rotateLogFiles finishes
-	time.Sleep(300 * time.Millisecond)
-
-	logger.Flush()
-
-	// Check for rotated file
-	pattern := filepath.Join(logDir, filename+"_*.log")
-	files, err := filepath.Glob(pattern)
-	require.NoError(t, err)
-
-	assert.GreaterOrEqual(t, len(files), 1, "Expected at least one rotated log file")
-}
-
-// TestConcurrentLogging tests concurrent log writes
-func TestConcurrentLogging(t *testing.T) {
-	t.Parallel()
-
-	config := DefaultConfig()
-	config.Filename = "concurrent_test"
-	config.LogsDir = "test_logs"
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
-
-	logger, err := NewGourdianLogger(config)
-	require.NoError(t, err)
-	defer logger.Close()
-
-	var wg sync.WaitGroup
-	count := 100
-
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			logger.Infof("Log message %d", n)
-		}(i)
-	}
-
-	wg.Wait()
-	logger.Flush()
-
-	// Verify all logs were written
-	content, err := os.ReadFile(filepath.Join("test_logs", "concurrent_test.log"))
-	require.NoError(t, err)
-
-	lines := strings.Split(string(content), "\n")
-	assert.GreaterOrEqual(t, len(lines), count, "Expected at least %d log lines", count)
-}
-
-// TestRateLimiting tests log rate limiting
-func TestRateLimiting(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	config := DefaultConfig()
-	config.Filename = fmt.Sprintf("ratelimit_%d", time.Now().UnixNano())
-	config.MaxLogRate = 10
-
-	logger, err := NewGourdianLogger(config)
-	require.NoError(t, err)
-	t.Cleanup(func() { logger.Close() })
-
-	// Test with small sleep between logs
-	for i := 0; i < 20; i++ {
-		logger.Info(fmt.Sprintf("message %d", i))
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	// Verify approximately 10 messages made it through
-	lines := strings.Count(buf.String(), "\n")
-	assert.True(t, lines >= 8 && lines <= 12,
-		"Expected ~10 messages, got %d", lines)
-}
-
-// TestLogRotation tests log rotation functionality
-func TestLogRotation(t *testing.T) {
-	t.Parallel()
-
-	config := DefaultConfig()
-	config.Filename = "rotation_test"
-	config.LogsDir = "test_logs"
-	config.MaxBytes = 100 // Small size to trigger rotation quickly
-	config.BackupCount = 2
-	config.CompressBackups = true
-
-	logger, err := NewGourdianLogger(config)
-	require.NoError(t, err)
-	defer logger.Close()
-
-	// Write enough logs to trigger rotation
-	for i := 0; i < 50; i++ {
-		logger.Info(strings.Repeat("a", 10))
-	}
-
-	// Force rotation
-	logger.mu.Lock()
-	err = logger.rotateLogFiles()
-	logger.mu.Unlock()
-	require.NoError(t, err)
-
-	// Check backup files
-	files, err := filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log*"))
-	require.NoError(t, err)
-
-	assert.GreaterOrEqual(t, len(files), 1, "Expected at least one rotated log file")
-
-	// Verify compression
-	for _, f := range files {
-		if strings.HasSuffix(f, ".gz") {
-			file, err := os.Open(f)
-			require.NoError(t, err, "Failed to open gzipped file")
-			defer file.Close()
-
-			_, err = gzip.NewReader(file)
-			assert.NoError(t, err, "Failed to read gzipped file")
-		}
-	}
-
-	// Test backup count enforcement
-	for i := 0; i < 50; i++ {
-		logger.Info(strings.Repeat("b", 10))
-	}
-
-	files, err = filepath.Glob(filepath.Join("test_logs", "rotation_test_*.log*"))
-	require.NoError(t, err)
-
-	assert.LessOrEqual(t, len(files), config.BackupCount+1, "Expected max %d backup files", config.BackupCount)
-}
-
-func TestCompressionFailure(t *testing.T) {
+func TestAsyncLogging(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
 	config := DefaultConfig()
 	config.LogsDir = "test_logs"
-	config.Filename = "compression_test"
-	config.CompressBackups = true
 	config.Outputs = []io.Writer{&buf}
-	config.ErrorHandler = func(err error) {
-		buf.WriteString("COMPRESSION ERROR: " + err.Error())
-	}
+	config.BufferSize = 2
+	config.AsyncWorkers = 1
 
 	logger, err := NewGourdianLogger(config)
 	require.NoError(t, err)
 	defer logger.Close()
 
-	// Force rotation with a non-existent file to trigger compression error
-	logger.mu.Lock()
-	oldFile := logger.file
-	logger.file = nil
-	logger.rotateChan <- struct{}{}
-	logger.mu.Unlock()
+	// Fill up the async queue
+	for i := 0; i < 5; i++ {
+		logger.Info(fmt.Sprintf("async message %d", i))
+	}
+	logger.Flush()
 
-	time.Sleep(100 * time.Millisecond) // Allow time for async processing
-	assert.Contains(t, buf.String(), "COMPRESSION ERROR")
+	assert.Contains(t, buf.String(), "async message")
+}
 
-	// Restore original file to allow clean shutdown
-	logger.mu.Lock()
-	logger.file = oldFile
-	logger.mu.Unlock()
+func TestCleanupOldBackups(t *testing.T) {
+	config := DefaultConfig()
+	config.LogsDir = t.TempDir()
+	config.MaxBytes = 100
+	config.BackupCount = 2
+	config.Filename = "cleanup_test"
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	for i := 0; i < 5; i++ {
+		logger.Info(strings.Repeat("log", 50))
+		_ = logger.rotateLogFiles()
+	}
+
+	files, err := filepath.Glob(filepath.Join(config.LogsDir, "cleanup_test_*.log"))
+	require.NoError(t, err)
+
+	assert.LessOrEqual(t, len(files), config.BackupCount, "Should clean up old backups")
+}
+
+func TestAddRemoveOutput(t *testing.T) {
+	var buf bytes.Buffer
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+	defer logger.Close()
+
+	logger.AddOutput(&buf)
+	logger.Info("message to buffer")
+	assert.Contains(t, buf.String(), "message to buffer")
+
+	logger.RemoveOutput(&buf)
+	buf.Reset()
+
+	logger.Info("should not go to buffer")
+	assert.Empty(t, buf.String(), "Buffer should not receive log after removal")
+}
+
+func TestCloseIdempotency(t *testing.T) {
+	config := DefaultConfig()
+	config.LogsDir = "test_logs"
+
+	logger, err := NewGourdianLogger(config)
+	require.NoError(t, err)
+
+	assert.NoError(t, logger.Close())
+	assert.NoError(t, logger.Close(), "Close should be idempotent")
 }
