@@ -1,4 +1,4 @@
-VERSION := vv0.0.2
+VERSION := v0.0.2
 
 .PHONY: build
 build:
