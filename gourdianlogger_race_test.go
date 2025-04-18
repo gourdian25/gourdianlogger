@@ -3,312 +3,461 @@ package gourdianlogger
 import (
 	"bytes"
 	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestRaceRotationWithLogging(t *testing.T) {
-	config := DefaultConfig()
-	config.MaxBytes = 100 // Small size to trigger rotation quickly
+// faultyWriter is an io.Writer that fails periodically for testing
+type faultyWriter struct {
+	failEvery int
+	counter   int
+	mu        sync.Mutex
+}
+
+func (fw *faultyWriter) Write(p []byte) (n int, err error) {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	fw.counter++
+	if fw.counter%fw.failEvery == 0 {
+		return 0, io.ErrShortWrite
+	}
+	return len(p), nil
+}
+
+type mockWriter struct{}
+
+func newMockWriter() (mockWriter, *os.File) {
+	f, _ := os.CreateTemp("", "mockwriter")
+	return mockWriter{}, f
+}
+
+func (m mockWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+// TestConcurrentLogging tests concurrent logging from multiple goroutines
+func TestConcurrentLogging(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "concurrent_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
+	defer os.RemoveAll("test_logs")
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Continuously log while rotation happens
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("message during rotation")
-		}
-	}()
-
-	// Trigger rotation multiple times
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
-			logger.rotateChan <- struct{}{}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+				if i%10 == 0 {
+					logger.SetLogLevel(LogLevel(i % 5))
+				}
+			}
+		}(i)
+	}
 	wg.Wait()
 }
 
-func TestRaceAsyncWorkerShutdown(t *testing.T) {
-	config := DefaultConfig()
-	config.BufferSize = 100
-	config.AsyncWorkers = 4
+// TestConcurrentClose tests closing the logger while logs are still being written
+func TestConcurrentClose(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "close_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create logger: %v", err)
 	}
+	defer os.RemoveAll("test_logs")
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+			}
+		}(i)
+	}
 
-	// Flood the async queue
+	// Close the logger while logs are still being written
 	go func() {
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("message during shutdown")
-		}
-	}()
-
-	// Close while messages are still being processed
-	go func() {
-		defer wg.Done()
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(time.Millisecond * 50)
 		logger.Close()
 	}()
 
 	wg.Wait()
 }
 
-func TestRaceBufferPool(t *testing.T) {
-	logger, err := NewGourdianLogger(DefaultConfig())
+// TestConcurrentOutputModification tests adding/removing outputs while logging
+func TestConcurrentOutputModification(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "output_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
+	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create logger: %v", err)
 	}
 	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	buf := &bytes.Buffer{}
+	logger.AddOutput(buf)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			logger.Info("concurrent pool usage")
-			logger.Warn("another concurrent message")
-		}()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+				if j%20 == 0 {
+					if i%2 == 0 {
+						logger.AddOutput(&bytes.Buffer{})
+					} else {
+						logger.RemoveOutput(buf)
+					}
+				}
+			}
+		}(i)
 	}
 	wg.Wait()
 }
 
-func TestRaceMultiWriter(t *testing.T) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{new(bytes.Buffer), new(bytes.Buffer)}
+// TestConcurrentLevelChange tests changing log level while logging
+func TestConcurrentLevelChange(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "level_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+				if j%10 == 0 {
+					logger.SetLogLevel(LogLevel(j % 5))
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestConcurrentDynamicLevel tests dynamic level function while logging
+func TestConcurrentDynamicLevel(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "dynamic_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	counter := 0
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		counter++
+		return LogLevel(counter % 5)
+	})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestConcurrentFlush tests flushing while logs are being written
+func TestConcurrentFlush(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "flush_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+				if j%20 == 0 {
+					go logger.Flush()
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestConcurrentConfigChange tests changing config while logging
+func TestConcurrentConfigChange(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "config_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		SampleRate:   1,
+		CallerDepth:  3,
+	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+				if j%25 == 0 {
+					newConfig := LoggerConfig{
+						Filename:     "config_test",
+						LogLevel:     LogLevel(j % 5),
+						BufferSize:   500 + j,
+						AsyncWorkers: 2 + (j % 3),
+						LogsDir:      "test_logs",
+					}
+					// This would normally be unsafe, but we're testing for races
+					logger.config = newConfig
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestConcurrentErrorHandling tests error handling under concurrent load
+func TestConcurrentErrorHandling(t *testing.T) {
+	// Create a faulty writer that will fail periodically
+	faultyWriter := &faultyWriter{failEvery: 10}
+	config := LoggerConfig{
+		Filename:       "error_test",
+		LogLevel:       DEBUG,
+		BufferSize:     1000,
+		AsyncWorkers:   4,
+		LogsDir:        "test_logs",
+		Outputs:        []io.Writer{faultyWriter},
+		EnableFallback: true,
+		SampleRate:     1,
+		CallerDepth:    3,
+	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("Message %d from goroutine %d", j, i)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestConcurrentJSONLogging tests concurrent JSON formatted logging
+func TestConcurrentJSONLogging(t *testing.T) {
+	config := LoggerConfig{
+		Filename:     "json_test",
+		LogLevel:     DEBUG,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogsDir:      "test_logs",
+		Format:       FormatJSON,
+		SampleRate:   1,
+		CallerDepth:  3,
+		FormatConfig: FormatConfig{
+			PrettyPrint: false,
+			CustomFields: map[string]interface{}{
+				"app": "test",
+			},
+		},
+	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+	defer os.RemoveAll("test_logs")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				fields := map[string]interface{}{
+					"goroutine": i,
+					"iteration": j,
+				}
+				logger.InfofWithFields(fields, "Message %d from goroutine %d", j, i)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestConcurrentLogging_NoRace(t *testing.T) {
+	logger, err := NewGourdianLogger(DefaultConfig())
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
 	}
 	defer logger.Close()
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				logger.Infof("goroutine %d message %d", id, j)
+			}
+		}(i)
+	}
 
-	// Add new output while logging
+	wg.Wait()
+}
+
+func TestDynamicLogLevel_SetGetRace(t *testing.T) {
+	logger, err := NewGourdianLogger(DefaultConfig())
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(2)
+
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.AddOutput(new(bytes.Buffer))
-		}
-	}()
-
-	// Remove output while logging
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			for _, w := range logger.outputs {
-				logger.RemoveOutput(w)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = logger.GetLogLevel()
 			}
 		}
 	}()
 
-	// Log continuously
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("message during writer changes")
+		for i := 0; i < 100; i++ {
+			logger.SetLogLevel(DEBUG)
+			logger.SetLogLevel(INFO)
+			logger.SetLogLevel(ERROR)
 		}
+		close(stop)
 	}()
 
 	wg.Wait()
 }
 
-func TestRaceLevelChanges(t *testing.T) {
+func TestAddRemoveOutputRace(t *testing.T) {
 	logger, err := NewGourdianLogger(DefaultConfig())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to create logger: %v", err)
 	}
 	defer logger.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(4)
-
-	levels := []LogLevel{DEBUG, INFO, WARN, ERROR, FATAL}
-
-	// Rapidly change log level
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.SetLogLevel(levels[i%len(levels)])
-		}
-	}()
-
-	// Log at different levels
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.Debug("debug message")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.Info("info message")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.Error("error message")
-		}
-	}()
-
-	wg.Wait()
-}
-
-func TestRaceCallerInfo(t *testing.T) {
-	config := DefaultConfig()
-	config.EnableCaller = true
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer logger.Close()
-
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			logger.Info("message with caller info")
-			logger.Error("error with caller info")
-		}()
-	}
-	wg.Wait()
-}
-
-func TestRaceFormatChanges(t *testing.T) {
-	config := DefaultConfig()
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer logger.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(3)
-
-	// Change format while logging
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			if i%2 == 0 {
-				logger.format = FormatPlain
-			} else {
-				logger.format = FormatJSON
-			}
-		}
-	}()
-
-	// Log plain messages
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("plain message")
-		}
-	}()
-
-	// Log JSON messages
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("json message")
-		}
-	}()
-
-	wg.Wait()
-}
-
-func TestRaceConfigChanges(t *testing.T) {
-	logger, err := NewGourdianLogger(DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer logger.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(4)
-
-	// Toggle caller info
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.enableCaller = !logger.enableCaller
-		}
-	}()
-
-	// Change timestamp format
-	go func() {
-		defer wg.Done()
-		formats := []string{time.RFC3339, time.RFC822, time.RFC1123}
-		for i := 0; i < 100; i++ {
-			logger.timestampFormat = formats[i%len(formats)]
-		}
-	}()
-
-	// Log messages
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 1000; i++ {
-			logger.Info("message during config changes")
-		}
-	}()
-
-	// Change format config
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 100; i++ {
-			logger.formatConfig.PrettyPrint = !logger.formatConfig.PrettyPrint
-		}
-	}()
-
-	wg.Wait()
-}
-
-func TestRaceCloseWithPendingMessages(t *testing.T) {
-	config := DefaultConfig()
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, w := newMockWriter()
+	defer w.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Flood the queue
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10000; i++ {
-			logger.Info("message before close")
+		for i := 0; i < 100; i++ {
+			logger.AddOutput(w)
+			time.Sleep(time.Millisecond)
 		}
 	}()
 
-	// Close while messages are still being processed
 	go func() {
 		defer wg.Done()
-		time.Sleep(50 * time.Millisecond)
-		logger.Close()
+		for i := 0; i < 100; i++ {
+			logger.RemoveOutput(w)
+			time.Sleep(time.Millisecond)
+		}
 	}()
 
 	wg.Wait()
