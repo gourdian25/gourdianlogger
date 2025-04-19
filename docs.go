@@ -1,171 +1,224 @@
-// Package gourdianlogger provides a high-performance, feature-rich logging utility for Go applications.
+// Package gourdianlogger provides a high-performance, feature-rich logging solution for Go.
 //
-// GourdianLogger supports the following features:
-//   - Multiple log levels (DEBUG, INFO, WARN, ERROR, FATAL)
-//   - Structured logging with custom fields
-//   - Configurable log formats (plain text or JSON)
-//   - Asynchronous logging with worker pools
-//   - Log file rotation by size or time
-//   - Gzip compression of rotated logs
-//   - Rate limiting (max logs per second)
-//   - Sampling (log 1 in N messages)
-//   - Caller tracing (file:line:function)
-//   - Environment-based overrides
-//   - Pluggable error handling and dynamic log level control
+// Overview:
+// GourdianLogger is designed for production systems requiring robust, configurable logging
+// with minimal performance impact. It combines traditional logging with modern features
+// like structured logging, sampling, and dynamic level control.
 //
-// GourdianLogger is designed for production use, with thread-safe operations and
-// high configurability.
+// Key Features:
+// - Multiple log levels (DEBUG, INFO, WARN, ERROR, FATAL)
+// - Plain text and JSON output formats
+// - Structured logging with arbitrary fields
+// - Asynchronous logging with configurable buffer and workers
+// - Dual rotation strategies (size-based and time-based)
+// - Gzip compression of rotated logs
+// - Rate limiting and log sampling
+// - Caller information (file:line:function)
+// - Environment variable overrides
+// - Pluggable error handling
+// - Thread-safe operations
 //
-// # Basic Usage
+// Getting Started:
 //
-//	import "github.com/your/module/gourdianlogger"
+// Basic example:
+//
+//	package main
+//
+//	import (
+//	    "github.com/your/module/gourdianlogger"
+//	)
 //
 //	func main() {
+//	    // Create logger with default configuration
 //	    logger, err := gourdianlogger.NewGourdianLogger(gourdianlogger.DefaultConfig())
 //	    if err != nil {
-//	        log.Fatal(err)
+//	        panic(err)
 //	    }
-//	    defer logger.Close()
+//	    defer logger.Close() // Important for flushing buffers
 //
-//	    logger.Info("App started")
-//	    logger.Warnf("Using fallback value: %s", fallback)
+//	    logger.Info("Application starting")
+//	    logger.Debugf("Initialized with config: %+v", config)
 //	}
 //
-// # JSON Configuration
+// Configuration:
 //
-// You can configure the logger via JSON string using `WithConfig`:
+// The logger can be configured either programmatically or via JSON:
+//
+// Programmatic configuration:
+//
+//	config := gourdianlogger.LoggerConfig{
+//	    Filename:        "myapp",
+//	    LogLevel:        gourdianlogger.INFO,
+//	    Format:          gourdianlogger.FormatJSON,
+//	    MaxBytes:        10 * 1024 * 1024, // 10MB
+//	    BackupCount:     5,
+//	    CompressBackups: true,
+//	}
+//
+// JSON configuration:
 //
 //	jsonCfg := `{
 //	    "filename": "app",
-//	    "log_level": "info",
-//	    "format": "json",
-//	    "max_bytes": 1048576,
-//	    "compress_backups": true
+//	    "log_level": "warn",
+//	    "format": "plain",
+//	    "max_bytes": 5000000,
+//	    "backup_count": 3
 //	}`
-//
 //	logger, err := gourdianlogger.WithConfig(jsonCfg)
 //
-// # Environment Overrides
+// Log Levels:
 //
-// The following environment variables can override config values:
+// Log levels control message verbosity. Messages below the configured level are ignored.
+// Level order: DEBUG < INFO < WARN < ERROR < FATAL
 //
-//   - LOG_LEVEL     → replaces LogLevelStr
-//   - LOG_FORMAT    → replaces FormatStr
-//   - LOG_DIR       → replaces LogsDir
-//   - LOG_RATE      → replaces MaxLogRate
+// Example level usage:
 //
-// Example:
+//	logger.SetLogLevel(gourdianlogger.WARN) // Only WARN and above
+//	logger.Debug("This won't appear")      // Below current level
+//	logger.Error("This will appear")       // Above current level
 //
-//	// Will override log level even if LoggerConfig.LogLevelStr is set to "debug"
-//	os.Setenv("LOG_LEVEL", "error")
+// Output Formats:
 //
-// # Log Levels
+// Two formats are supported:
+// - FormatPlain: Human-readable text (default)
+// - FormatJSON: Structured JSON output
 //
-// Log levels filter what gets output. For example, setting `LogLevel = INFO` will ignore all DEBUG logs.
+// Format comparison:
 //
-// Constants:
-//   - gourdianlogger.DEBUG
-//   - gourdianlogger.INFO
-//   - gourdianlogger.WARN
-//   - gourdianlogger.ERROR
-//   - gourdianlogger.FATAL
+// Plain:
+// 2025-04-19 10:00:00.000000 [INFO] main.go:42: Server started on port 8080
 //
-// Example:
-//
-//	logger.SetLogLevel(gourdianlogger.WARN)
-//	logger.Debug("This will be skipped")
-//	logger.Warn("This will be printed")
-//
-// # Log Formats
-//
-// Log output can be formatted as plain text or JSON.
-//
-// Example JSON log:
+// JSON:
 //
 //	{
-//	  "timestamp": "2025-04-18 17:00:00.123456",
+//	  "timestamp": "2025-04-19 10:00:00.000000",
 //	  "level": "INFO",
-//	  "message": "Server started",
-//	  "service": "api"
+//	  "message": "Server started on port 8080",
+//	  "caller": "main.go:42"
 //	}
 //
-// Use `FormatConfig.PrettyPrint = true` for indented JSON.
+// Structured Logging:
 //
-// # Rotation
-//
-// Supports both size-based and time-based rotation.
-//   - Size-based: when the log file exceeds `MaxBytes`
-//   - Time-based: rotates every `RotationTime` (e.g., `time.Hour`)
-//
-// Rotated files follow the pattern: `filename_YYYYMMDD_HHMMSS.log`
-// If `CompressBackups` is true, they are compressed as `.log.gz`
-//
-// # Structured Logging
-//
-// You can attach custom fields using `WithFields` or `*fWithFields` variants:
+// Add contextual fields to log messages:
 //
 //	logger.InfofWithFields(map[string]interface{}{
-//	    "user_id": uid,
-//	    "event": "login",
-//	}, "User authenticated")
+//	    "user_id":   123,
+//	    "duration":  45.2,
+//	    "endpoint":  "/api/user",
+//	    "success":   true,
+//	}, "Request processed")
 //
-// # Asynchronous Logging
+// Outputs (JSON):
 //
-// Enable async logging by setting `BufferSize > 0`.
-// This uses a buffered channel + worker pool for non-blocking writes.
-//
-//	logger := gourdianlogger.LoggerConfig{
-//	    BufferSize: 500,
-//	    AsyncWorkers: 3,
+//	{
+//	  "timestamp": "...",
+//	  "level": "INFO",
+//	  "message": "Request processed",
+//	  "user_id": 123,
+//	  "duration": 45.2,
+//	  "endpoint": "/api/user",
+//	  "success": true
 //	}
 //
-// Ensure `logger.Flush()` is called before shutdown to prevent log loss.
+// Log Rotation:
 //
-// # Sampling
+// Two rotation strategies:
+// 1. Size-based: Rotate when file exceeds MaxBytes
+// 2. Time-based: Rotate every RotationTime duration
 //
-// Sampling logs 1 in N messages (useful in high-frequency systems).
-// Example:
+// Rotation example:
 //
-//	logger.SampleRate = 10 // log 1 of every 10 messages
+//	config := gourdianlogger.DefaultConfig()
+//	config.MaxBytes = 50 * 1024 * 1024 // 50MB
+//	config.RotationTime = 24 * time.Hour // Daily rotation
+//	config.CompressBackups = true // Gzip rotated logs
 //
-// # Rate Limiting
+// Creates files like:
+// - app.log (current)
+// - app_20250419_000000.log.gz (rotated)
+// - app_20250418_000000.log.gz (rotated)
 //
-// `MaxLogRate` limits logs per second. Useful for spammy components.
+// Asynchronous Logging:
 //
-//	logger.MaxLogRate = 100 // max 100 logs/sec
+// For high-throughput systems, enable async logging:
 //
-// # Custom Error Handler
+//	config := gourdianlogger.DefaultConfig()
+//	config.BufferSize = 1000      // Buffer capacity
+//	config.AsyncWorkers = 4       // Parallel workers
 //
-// Customize what happens when logging errors occur:
+// Important: Call logger.Flush() before shutdown to ensure all logs are written.
 //
-//	logger.ErrorHandler = func(err error) {
-//	    metrics.Increment("log_error")
-//	    fallbackLogger.Error("Logging failed: ", err)
-//	}
+// Advanced Features:
 //
-// # Dynamic Log Level
+// Rate Limiting:
 //
-// You can change the active log level dynamically:
+//	config.MaxLogRate = 100 // Max 100 logs/second
+//
+// Sampling:
+//
+//	config.SampleRate = 10 // Log 1 in 10 messages
+//
+// Dynamic Level Control:
 //
 //	logger.SetDynamicLevelFunc(func() gourdianlogger.LogLevel {
-//	    if os.Getenv("DEBUG_MODE") == "true" {
+//	    if debugMode {
 //	        return gourdianlogger.DEBUG
 //	    }
 //	    return gourdianlogger.INFO
 //	})
 //
-// # Shutdown
+// Custom Error Handling:
 //
-// Always call `logger.Close()` before your application exits to flush logs:
+//	logger.ErrorHandler = func(err error) {
+//	    sentry.CaptureException(err)
+//	    fmt.Fprintf(os.Stderr, "LOGGER ERROR: %v\n", err)
+//	}
 //
-//	defer logger.Close()
+// Environment Overrides:
 //
-// # Testing Tip
+// Configuration can be overridden via environment variables:
+// - LOG_LEVEL  (e.g. "debug", "info")
+// - LOG_FORMAT ("plain" or "json")
+// - LOG_DIR    (log directory path)
+// - LOG_RATE   (max logs per second)
 //
-// To disable file output during unit tests:
+// Example:
 //
-//	config := gourdianlogger.DefaultConfig()
-//	config.Outputs = []io.Writer{gourdianlogger.StdoutOnly()} // or custom buffer
-//	config.Filename = ""
-//	config.LogsDir = ""
+//	os.Setenv("LOG_LEVEL", "debug")
+//	os.Setenv("LOG_FORMAT", "json")
+//
+// Testing:
+//
+// For testing, you may want to:
+// - Disable file output
+// - Use a buffer for verification
+// - Set synchronous logging
+//
+// Test configuration example:
+//
+//	func TestLogger(t *testing.T) {
+//	    var buf bytes.Buffer
+//	    config := gourdianlogger.DefaultConfig()
+//	    config.Filename = "" // Disable file output
+//	    config.Outputs = []io.Writer{&buf}
+//	    config.BufferSize = 0 // Synchronous for testing
+//
+//	    logger, _ := gourdianlogger.NewGourdianLogger(config)
+//	    logger.Info("Test message")
+//	    assert.Contains(t, buf.String(), "Test message")
+//	}
+//
+// Best Practices:
+// 1. Always defer logger.Close()
+// 2. For async logging, ensure proper buffer sizing
+// 3. Set appropriate log levels in production
+// 4. Use structured logging for machine-readable logs
+// 5. Monitor log rotation in high-volume systems
+// 6. Consider log sampling for high-frequency debug logs
+//
+// Performance Notes:
+// - JSON formatting has ~10-15% overhead vs plain text
+// - Async logging reduces latency but increases memory usage
+// - Caller information adds minor overhead
+// - Structured fields require additional allocations
 package gourdianlogger
