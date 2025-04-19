@@ -1,23 +1,28 @@
 package main
 
 import (
+	"log"
+
 	"github.com/gourdian25/gourdianlogger"
 )
 
 func main() {
-	logger, _ := gourdianlogger.NewGourdianLoggerWithDefault()
+	// Create a logger with default configuration
+	logger, err := gourdianlogger.NewGourdianLoggerWithDefault()
+	if err != nil {
+		log.Fatalf("Failed to create logger: %v", err)
+	}
 	defer logger.Close()
 
-	// With fields
-	logger.InfoWithFields(map[string]interface{}{
-		"user_id": 123,
-		"action":  "login",
-	}, "User logged in")
+	// Basic logs at various levels
+	logger.Debug("This is a debug message")       // visible in default config
+	logger.Info("Server started successfully")    // general info
+	logger.Warn("Disk space is running low")      // warning message
+	logger.Error("Failed to connect to database") // error message
 
-	// Formatted with fields
+	// Structured log with additional context
 	logger.InfofWithFields(map[string]interface{}{
-		"duration_ms": 45,
-		"method":      "GET",
-		"path":        "/api/users",
-	}, "Request processed in %dms", 45)
+		"user_id":   123,
+		"operation": "signup",
+	}, "User registration completed")
 }
