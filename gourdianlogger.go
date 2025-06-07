@@ -658,16 +658,24 @@ func (l *Logger) Close() error {
 		return nil
 	}
 
-	// First stop accepting new messages
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
 	close(l.rotateCloseChan)
 
-	// Wait for all workers to finish processing
-	l.wg.Wait()
+	// Wait with timeout
+	done := make(chan struct{})
+	go func() {
+		l.wg.Wait()
+		close(done)
+	}()
 
-	// Now safely close the file
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		// Timeout reached, proceed with closing anyway
+	}
+
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 
