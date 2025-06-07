@@ -1,6 +1,5 @@
 <!-- File: test_coverage/integration_coverage.html -->
 
-
 <!DOCTYPE html>
 <html>
 	<head>
@@ -58,7 +57,7 @@
 				<select id="files">
 				
 				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (72.8%)</option>
-				
+
 				</select>
 			</div>
 			<div id="legend">
@@ -504,6 +503,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                 case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
                         // Process remaining messages
                         if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+
                                 l.writeBatch(batch)
                         }</span>
                         // Drain the queue
@@ -744,6 +744,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 select </span>{
                 case l.asyncQueue &lt;- buf:<span class="cov8" title="1"></span>
                 default:<span class="cov0" title="0">
+
                         l.writeBuffer(buf)</span>
                 }
         } else<span class="cov8" title="1"> {

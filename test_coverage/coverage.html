@@ -1,6 +1,5 @@
 <!-- File: test_coverage/coverage.html -->
 
-
 <!DOCTYPE html>
 <html>
 	<head>
@@ -58,6 +57,7 @@
 				<select id="files">
 				
 				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (91.3%)</option>
+
 				
 				</select>
 			</div>
@@ -543,6 +543,7 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1
                         l.bufferPool.Put(buf) // Return buffers to pool if paused
                 }</span>
                 <span class="cov8" title="1">return</span>
+
         }
 
         <span class="cov8" title="1">l.fileMu.Lock()

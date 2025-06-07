@@ -3,6 +3,9 @@ VERSION := v0.0.6
 # Create test coverage directory
 COVERAGE_DIR := test_coverage
 
+# Create test coverage directory
+COVERAGE_DIR := test_coverage
+
 .PHONY: build
 build:
 	go build -ldflags="-X github.com/gourdian25/gourdianlogger.Version=$(VERSION)" ./...
