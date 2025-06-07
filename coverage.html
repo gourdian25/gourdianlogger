@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (64.7%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.8%)</option>
 				
 				</select>
 			</div>
@@ -277,7 +277,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
                 logger.fallbackWriter = os.Stderr
         }</span>
 
-        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov8" title="1">{
                 logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
         }</span>
 
@@ -383,7 +383,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                         }</span>
                 case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
                         // Process remaining messages
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                         }</span>
                         // Drain the queue
@@ -482,7 +482,7 @@ func (l *Logger) formatJSON(level LogLevel, message, callerInfo string, fields m
                 logEntry["caller"] = callerInfo
         }</span>
 
-        <span class="cov8" title="1">for k, v := range l.config.CustomFields </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">for k, v := range l.config.CustomFields </span><span class="cov8" title="1">{
                 logEntry[k] = v
         }</span>
 
@@ -538,7 +538,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 return
         }</span>
 
-        <span class="cov8" title="1">if l.rateLimiter != nil &amp;&amp; !l.rateLimiter.Allow() </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if l.rateLimiter != nil &amp;&amp; !l.rateLimiter.Allow() </span><span class="cov8" title="1">{
                 return
         }</span>
 
@@ -557,7 +557,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 
         <span class="cov8" title="1">var formatted string
         switch l.format </span>{
-        case FormatJSON:<span class="cov0" title="0">
+        case FormatJSON:<span class="cov8" title="1">
                 formatted = l.formatJSON(level, message, callerInfo, fields)</span>
         default:<span class="cov8" title="1">
                 formatted = l.formatPlain(level, message, callerInfo, fields)</span>
@@ -570,7 +570,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 
                 select </span>{
                 case l.asyncQueue &lt;- buf:<span class="cov8" title="1"></span>
-                default:<span class="cov0" title="0">
+                default:<span class="cov8" title="1">
                         l.writeBuffer(buf)</span>
                 }
         } else<span class="cov8" title="1"> {
@@ -811,19 +811,19 @@ func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" titl
         // os.Exit(1)
 }</span>
 
-func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprint(v...), fields)
 }</span>
 
-func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprint(v...), fields)
 }</span>
 
-func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprint(v...), fields)
 }</span>
 
-func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprint(v...), fields)
 }</span>
 
