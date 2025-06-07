@@ -1,4 +1,4 @@
-# File: prompt.txt
+// File: gourdianlogger.go
 
 package gourdianlogger
 
@@ -441,22 +441,27 @@ func (l *Logger) getCallerInfo() string {
 		return ""
 	}
 
-	pc, file, line, ok := runtime.Caller(3)
+	pc, file, line, ok := runtime.Caller(3) // Adjusted depth for logger methods
 	if !ok {
 		return ""
 	}
 
+	// Get function name
 	fn := runtime.FuncForPC(pc)
 	if fn == nil {
 		return fmt.Sprintf("%s:%d", filepath.Base(file), line)
 	}
 
-	fullFnName := fn.Name()
-	if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash >= 0 {
-		fullFnName = fullFnName[lastSlash+1:]
+	// Extract just the function name without package path
+	fnName := fn.Name()
+	if lastSlash := strings.LastIndex(fnName, "/"); lastSlash >= 0 {
+		fnName = fnName[lastSlash+1:]
+	}
+	if lastDot := strings.LastIndex(fnName, "."); lastDot >= 0 {
+		fnName = fnName[lastDot+1:]
 	}
 
-	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName)
+	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fnName)
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
@@ -464,19 +469,25 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
-	// Check closed status right before processing
 	if l.closed.Load() {
 		return
 	}
 
-	if l.rateLimiter != nil && !l.rateLimiter.Allow() {
-		return
+	// Check rate limiting before doing any work
+	if l.rateLimiter != nil {
+		if !l.rateLimiter.Allow() {
+			return // Silently drop the message if rate limited
+		}
 	}
 
-	currentLevel := LogLevel(l.level.Load())
+	// Rest of the existing log method...
+	var currentLevel LogLevel
 	if l.dynamicLevelFn != nil {
 		currentLevel = l.dynamicLevelFn()
+	} else {
+		currentLevel = LogLevel(l.level.Load())
 	}
+
 	if level < currentLevel {
 		return
 	}
@@ -539,16 +550,20 @@ func (l *Logger) rotateLogFiles() error {
 		return nil
 	}
 
+	// Close current file
 	oldFile := l.file
 	if err := oldFile.Close(); err != nil {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
 
+	// Create new filename with timestamp
 	base := strings.TrimSuffix(l.baseFilename, ".log")
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
+	// Rename current file to backup
 	if err := os.Rename(l.baseFilename, backupPath); err != nil {
+		// If rename fails, try to reopen the original file
 		file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if openErr != nil {
 			return fmt.Errorf("failed to rename log file (%v) and couldn't reopen original (%v)", err, openErr)
@@ -557,22 +572,26 @@ func (l *Logger) rotateLogFiles() error {
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
+	// Create new log file
 	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create new log file: %w", err)
 	}
 
+	// Update logger state
 	l.file = file
 
+	// Update multiWriter with new file
 	l.outputsMu.Lock()
-	outputs := []io.Writer{os.Stdout, file}
-	if len(l.outputs) > 2 {
-		outputs = append(outputs, l.outputs[2:]...)
+	outputs := []io.Writer{file}
+	if len(l.outputs) > 1 { // Keep other outputs
+		outputs = append(outputs, l.outputs[1:]...)
 	}
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
 	l.outputsMu.Unlock()
 
+	// Clean up old backups
 	l.cleanupOldBackups()
 	return nil
 }
@@ -597,9 +616,19 @@ func (l *Logger) cleanupOldBackups() {
 
 func (l *Logger) Flush() {
 	if l.asyncQueue != nil {
+		// Wait for the queue to be empty
 		for len(l.asyncQueue) > 0 {
 			time.Sleep(10 * time.Millisecond)
 		}
+
+		// Give async workers a moment to process any in-flight messages
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// If there are any async workers, wait for them to finish current work
+	if l.asyncWorkers > 0 {
+		// This gives time for any batch writes to complete
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -760,8 +789,8 @@ func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}
 
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), fields)
-	// l.Flush()
-	// os.Exit(1)
+	l.Flush()
+	os.Exit(1)
 }
 
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
@@ -782,32 +811,108 @@ func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, 
 
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), fields)
-	// l.Flush()
-	// os.Exit(1)
+	l.Flush()
+	os.Exit(1)
 }
 
 
-
-Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestCallerInfo$ github.com/gourdian25/gourdianlogger
-
-=== RUN   TestCallerInfo
-2025-06-07 14:40:41.184362 [INFO] /home/logan/gourdianlogger/gourdianlogger_test.go:832:gourdianlogger.TestCallerInfo.func1:test message with caller
-    /home/logan/gourdianlogger/gourdianlogger_test.go:843: Function name not found in caller info
---- FAIL: TestCallerInfo (0.00s)
+2025-06-07 16:58:35.586133 [INFO] message 88
+2025-06-07 16:58:35.586131 [INFO] message 499
+2025-06-07 16:58:35.586137 [INFO] message 89
+2025-06-07 16:58:35.586139 [INFO] message 111
+2025-06-07 16:58:35.586140 [INFO] message 322
+2025-06-07 16:58:35.586141 [INFO] message 90
+2025-06-07 16:58:35.586144 [INFO] message 112
+2025-06-07 16:58:35.586145 [INFO] message 91
+2025-06-07 16:58:35.586145 [INFO] message 323
+2025-06-07 16:58:35.586148 [INFO] message 113
+2025-06-07 16:58:35.586150 [INFO] message 324
+2025-06-07 16:58:35.586150 [INFO] message 92
+2025-06-07 16:58:35.585735 [INFO] message 53
+2025-06-07 16:58:35.586155 [INFO] message 93
+2025-06-07 16:58:35.586155 [INFO] message 325
+2025-06-07 16:58:35.586156 [INFO] message 110
+2025-06-07 16:58:35.585736 [INFO] message 75
+    /home/logan/gourdianlogger/gourdianlogger_integration_test.go:517: Expected <=0 messages due to rate limiting, got 100
+--- FAIL: TestIntegrationRateLimitingWithConcurrency (0.00s)
 FAIL
-FAIL    github.com/gourdian25/gourdianlogger    0.012s
+FAIL    github.com/gourdian25/gourdianlogger    0.004s
+
+
+// TestIntegrationRateLimitingWithConcurrency tests rate limiting under concurrent load
+func TestIntegrationRateLimitingWithConcurrency(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:    tempDir,
+		Outputs:    []io.Writer{buf},
+		MaxLogRate: 100, // 100 logs per second
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	var wg sync.WaitGroup
+	messages := 500
+
+	// Concurrent logging that would exceed rate limit if not enforced
+	start := time.Now()
+	for i := 0; i < messages; i++ {
+		wg.Add(1)
+		go func(num int) {
+			defer wg.Done()
+			logger.Info(fmt.Sprintf("message %d", num))
+		}(i)
+	}
+	wg.Wait()
+	logger.Flush()
+	duration := time.Since(start)
+
+	// Count the number of messages that got through
+	output := buf.String()
+	count := strings.Count(output, "message")
+
+	// Verify rate was approximately enforced
+	expectedMax := int(float64(config.MaxLogRate) * duration.Seconds() * 1.1) // Allow 10% over
+	if count > expectedMax {
+		t.Errorf("Expected <=%d messages due to rate limiting, got %d", expectedMax, count)
+	}
+}
+
+
+25-06-07 16:59:05.443510 [INFO] message 461
+2025-06-07 16:59:05.443512 [INFO] message 462
+2025-06-07 16:59:05.443513 [INFO] message 463
+2025-06-07 16:59:05.443516 [INFO] message 464
+2025-06-07 16:59:05.443517 [INFO] message 465
+2025-06-07 16:59:05.443519 [INFO] message 466
+2025-06-07 16:59:05.443521 [INFO] message 467
+2025-06-07 16:59:05.443521 [INFO] message 468
+2025-06-07 16:59:05.443540 [INFO] message 469
+2025-06-07 16:59:05.443558 [INFO] message 478
+2025-06-07 16:59:05.443563 [INFO] message 481
+2025-06-07 16:59:05.443569 [INFO] message 484
+    /home/logan/gourdianlogger/gourdianlogger_integration_test.go:570: Pause didn't seem to have any effect
+--- FAIL: TestIntegrationPauseResumeWithConcurrency (0.31s)
+FAIL
+FAIL    github.com/gourdian25/gourdianlogger    0.309s
 
 
 
-
-func TestCallerInfo(t *testing.T) {
+// TestIntegrationPauseResumeWithConcurrency tests pause/resume functionality under concurrent load
+func TestIntegrationPauseResumeWithConcurrency(t *testing.T) {
 	tempDir := t.TempDir()
 	buf := &bytes.Buffer{}
 
 	config := LoggerConfig{
 		LogsDir:      tempDir,
 		Outputs:      []io.Writer{buf},
-		EnableCaller: true,
+		BufferSize:   1000,
+		AsyncWorkers: 5,
 	}
 
 	logger, err := NewGourdianLogger(config)
@@ -816,45 +921,62 @@ func TestCallerInfo(t *testing.T) {
 	}
 	defer logger.Close()
 
-	// This function will appear in the caller info
-	logTestMessage := func() {
-		logger.Info("test message with caller")
+	var wg sync.WaitGroup
+	messages := 500
+
+	// Start logging in background
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < messages; i++ {
+			logger.Info(fmt.Sprintf("message %d", i))
+		}
+	}()
+
+	// Pause and resume multiple times
+	for i := 0; i < 5; i++ {
+		time.Sleep(10 * time.Millisecond)
+		logger.Pause()
+		time.Sleep(10 * time.Millisecond)
+		logger.Resume()
 	}
 
-	logTestMessage()
+	wg.Wait()
 	logger.Flush()
 
+	// Count messages - exact count isn't predictable due to concurrency
+	// but we should have some messages
 	output := buf.String()
-	if !strings.Contains(output, "logger_test.go") {
-		t.Error("Caller info not found in log output")
+	count := strings.Count(output, "message")
+	if count == 0 {
+		t.Error("No messages were logged")
 	}
-	if !strings.Contains(output, "logTestMessage") {
-		t.Error("Function name not found in caller info")
+	if count >= messages {
+		t.Error("Pause didn't seem to have any effect")
 	}
 }
 
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestIntegrationCustomTimestampFormat$ github.com/gourdian25/gourdianlogger
 
-Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestDynamicLogLevel$ github.com/gourdian25/gourdianlogger
-
-=== RUN   TestDynamicLogLevel
-2025-06-07 14:41:38.953265 [INFO] info message 1
-2025-06-07 14:41:38.953394 [INFO] info message 2
-    /home/logan/gourdianlogger/gourdianlogger_test.go:933: Info message 1 should not be logged
-    /home/logan/gourdianlogger/gourdianlogger_test.go:936: Debug message 2 should be logged
---- FAIL: TestDynamicLogLevel (0.00s)
+=== RUN   TestIntegrationCustomTimestampFormat
+2025-Jun-07 16:59:47.606 [INFO] test message
+    /home/logan/gourdianlogger/gourdianlogger_integration_test.go:605: Timestamp "2025-Jun-07" doesn't match format "2006-Jan-02 15:04:05.000": parsing time "2025-Jun-07" as "2006-Jan-02 15:04:05.000": cannot parse "" as "15"
+--- FAIL: TestIntegrationCustomTimestampFormat (0.00s)
 FAIL
-FAIL    github.com/gourdian25/gourdianlogger    0.006s
+FAIL    github.com/gourdian25/gourdianlogger    0.003s
 
 
 
-func TestDynamicLogLevel(t *testing.T) {
+// TestIntegrationCustomTimestampFormat tests custom timestamp formatting
+func TestIntegrationCustomTimestampFormat(t *testing.T) {
 	tempDir := t.TempDir()
 	buf := &bytes.Buffer{}
 
+	customFormat := "2006-Jan-02 15:04:05.000"
 	config := LoggerConfig{
-		LogsDir:  tempDir,
-		Outputs:  []io.Writer{buf},
-		LogLevel: INFO,
+		LogsDir:         tempDir,
+		Outputs:         []io.Writer{buf},
+		TimestampFormat: customFormat,
 	}
 
 	logger, err := NewGourdianLogger(config)
@@ -863,127 +985,21 @@ func TestDynamicLogLevel(t *testing.T) {
 	}
 	defer logger.Close()
 
-	// Set dynamic level function that changes between calls
-	counter := 0
-	logger.SetDynamicLevelFunc(func() LogLevel {
-		counter++
-		if counter%2 == 0 {
-			return DEBUG
-		}
-		return ERROR
-	})
-
-	// These should be filtered based on dynamic level
-	logger.Debug("debug message 1") // Shouldn't log (dynamic level ERROR)
-	logger.Info("info message 1")   // Shouldn't log (dynamic level ERROR)
-	logger.Debug("debug message 2") // Should log (dynamic level DEBUG)
-	logger.Info("info message 2")   // Should log (dynamic level DEBUG)
-
+	logger.Info("test message")
 	logger.Flush()
 
 	output := buf.String()
 
-	if strings.Contains(output, "debug message 1") {
-		t.Error("Debug message 1 should not be logged")
+	// Try to parse the timestamp with our custom format
+	parts := strings.SplitN(output, " ", 2)
+	if len(parts) < 1 {
+		t.Fatal("Couldn't parse timestamp from log output")
 	}
-	if strings.Contains(output, "info message 1") {
-		t.Error("Info message 1 should not be logged")
-	}
-	if !strings.Contains(output, "debug message 2") {
-		t.Error("Debug message 2 should be logged")
-	}
-	if !strings.Contains(output, "info message 2") {
-		t.Error("Info message 2 should be logged")
+
+	_, err = time.Parse(customFormat, parts[0])
+	if err != nil {
+		t.Errorf("Timestamp %q doesn't match format %q: %v", parts[0], customFormat, err)
 	}
 }
 
-
-Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestFileRotationSignal$ github.com/gourdian25/gourdianlogger
-
-=== RUN   TestFileRotationSignal
-    /home/logan/gourdianlogger/gourdianlogger_test.go:973: Expected 1 backup file after rotation, got 0
---- FAIL: TestFileRotationSignal (0.10s)
-FAIL
-FAIL    github.com/gourdian25/gourdianlogger    0.106s
-
-
-
-func TestFileRotationSignal(t *testing.T) {
-	tempDir := t.TempDir()
-
-	config := LoggerConfig{
-		LogsDir:     tempDir,
-		Filename:    "rotation_signal_test",
-		MaxBytes:    1000,
-		BackupCount: 1,
-	}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-	defer logger.Close()
-
-	// Manually trigger rotation
-	logger.rotateChan <- struct{}{}
-
-	// Give some time for rotation to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Check if rotation occurred by looking for backup file
-	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
-	backups, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatalf("Failed to find backup files: %v", err)
-	}
-
-	if len(backups) != 1 {
-		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
-	}
-}
-
-
-Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestFileRotationSignaling$ github.com/gourdian25/gourdianlogger
-
-=== RUN   TestFileRotationSignaling
-    /home/logan/gourdianlogger/gourdianlogger_test.go:1008: Rotation signal did not result in backup file creation
---- FAIL: TestFileRotationSignaling (0.10s)
-FAIL
-FAIL    github.com/gourdian25/gourdianlogger    0.114s
-
-
-func TestFileRotationSignaling(t *testing.T) {
-	tempDir := t.TempDir()
-
-	config := LoggerConfig{
-		LogsDir:     tempDir,
-		Filename:    "rotation_signal_test",
-		MaxBytes:    50, // Very small to force rotation
-		BackupCount: 1,
-	}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-	defer logger.Close()
-
-	// Manually trigger rotation
-	logger.fileMu.Lock()
-	logger.rotateChan <- struct{}{}
-	logger.fileMu.Unlock()
-
-	// Give time for rotation to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Check if rotation occurred by looking for backup file
-	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
-	backups, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatalf("Error checking for backup files: %v", err)
-	}
-	if len(backups) == 0 {
-		t.Error("Rotation signal did not result in backup file creation")
-	}
-}
 

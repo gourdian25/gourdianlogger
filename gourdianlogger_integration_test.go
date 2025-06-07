@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestIntegrationLogRotationWithMultipleFiles tests the complete log rotation cycle
@@ -473,134 +474,132 @@ func TestIntegrationJSONFormatWithCustomFields(t *testing.T) {
 	}
 }
 
-// // TestIntegrationRateLimitingWithConcurrency tests rate limiting under concurrent load
-// func TestIntegrationRateLimitingWithConcurrency(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+// TestIntegrationRateLimitingWithConcurrency tests rate limiting under concurrent load
+func TestIntegrationRateLimitingWithConcurrency(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	config := LoggerConfig{
-// 		LogsDir:    tempDir,
-// 		Outputs:    []io.Writer{buf},
-// 		MaxLogRate: 100, // 100 logs per second
-// 	}
+	config := LoggerConfig{
+		LogsDir:    tempDir,
+		Outputs:    []io.Writer{buf},
+		MaxLogRate: 100, // 100 logs per second
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	var wg sync.WaitGroup
-// 	messages := 500
+	var wg sync.WaitGroup
+	messages := 500
 
-// 	// Concurrent logging that would exceed rate limit if not enforced
-// 	start := time.Now()
-// 	for i := 0; i < messages; i++ {
-// 		wg.Add(1)
-// 		go func(num int) {
-// 			defer wg.Done()
-// 			logger.Info(fmt.Sprintf("message %d", num))
-// 		}(i)
-// 	}
-// 	wg.Wait()
-// 	logger.Flush()
-// 	duration := time.Since(start)
+	// Concurrent logging that would exceed rate limit if not enforced
+	for i := 0; i < messages; i++ {
+		wg.Add(1)
+		go func(num int) {
+			defer wg.Done()
+			logger.Info(fmt.Sprintf("message %d", num))
+		}(i)
+	}
+	wg.Wait()
+	logger.Flush()
 
-// 	// Count the number of messages that got through
-// 	output := buf.String()
-// 	count := strings.Count(output, "message")
+	// Count the number of messages that got through
+	output := buf.String()
+	count := strings.Count(output, "message")
 
-// 	// Verify rate was approximately enforced
-// 	expectedMax := int(float64(config.MaxLogRate) * duration.Seconds() * 1.1) // Allow 10% over
-// 	if count > expectedMax {
-// 		t.Errorf("Expected <=%d messages due to rate limiting, got %d", expectedMax, count)
-// 	}
-// }
+	// Verify rate was approximately enforced
+	expectedMax := config.MaxLogRate + 10
+	if count > expectedMax {
+		t.Errorf("Expected <=%d messages due to rate limiting, got %d", expectedMax, count)
+	}
+}
 
-// // TestIntegrationPauseResumeWithConcurrency tests pause/resume functionality under concurrent load
-// func TestIntegrationPauseResumeWithConcurrency(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+// TestIntegrationPauseResumeWithConcurrency tests pause/resume functionality under concurrent load
+func TestIntegrationPauseResumeWithConcurrency(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	config := LoggerConfig{
-// 		LogsDir:      tempDir,
-// 		Outputs:      []io.Writer{buf},
-// 		BufferSize:   1000,
-// 		AsyncWorkers: 5,
-// 	}
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		BufferSize:   1000,
+		AsyncWorkers: 5,
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	var wg sync.WaitGroup
-// 	messages := 500
+	var wg sync.WaitGroup
+	messages := 500
 
-// 	// Start logging in background
-// 	wg.Add(1)
-// 	go func() {
-// 		defer wg.Done()
-// 		for i := 0; i < messages; i++ {
-// 			logger.Info(fmt.Sprintf("message %d", i))
-// 		}
-// 	}()
+	// Start logging in background
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < messages; i++ {
+			logger.Info(fmt.Sprintf("message %d", i))
+		}
+	}()
 
-// 	// Pause and resume multiple times
-// 	for i := 0; i < 5; i++ {
-// 		time.Sleep(10 * time.Millisecond)
-// 		logger.Pause()
-// 		time.Sleep(10 * time.Millisecond)
-// 		logger.Resume()
-// 	}
+	// Pause and resume multiple times
+	for i := 0; i < 5; i++ {
+		time.Sleep(10 * time.Millisecond)
+		logger.Pause()
+		time.Sleep(10 * time.Millisecond)
+		logger.Resume()
+	}
 
-// 	wg.Wait()
-// 	logger.Flush()
+	wg.Wait()
+	logger.Flush()
 
-// 	// Count messages - exact count isn't predictable due to concurrency
-// 	// but we should have some messages
-// 	output := buf.String()
-// 	count := strings.Count(output, "message")
-// 	if count == 0 {
-// 		t.Error("No messages were logged")
-// 	}
-// 	if count >= messages {
-// 		t.Error("Pause didn't seem to have any effect")
-// 	}
-// }
+	// Count messages - exact count isn't predictable due to concurrency
+	// but we should have some messages
+	output := buf.String()
+	count := strings.Count(output, "message")
+	if count == 0 {
+		t.Error("No messages were logged")
+	}
+	if count >= messages {
+		t.Error("Pause didn't seem to have any effect")
+	}
+}
 
-// // TestIntegrationCustomTimestampFormat tests custom timestamp formatting
-// func TestIntegrationCustomTimestampFormat(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+// TestIntegrationCustomTimestampFormat tests custom timestamp formatting
+func TestIntegrationCustomTimestampFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	customFormat := "2006-Jan-02 15:04:05.000"
-// 	config := LoggerConfig{
-// 		LogsDir:         tempDir,
-// 		Outputs:         []io.Writer{buf},
-// 		TimestampFormat: customFormat,
-// 	}
+	customFormat := "2006-Jan-02 15:04:05.000"
+	config := LoggerConfig{
+		LogsDir:         tempDir,
+		Outputs:         []io.Writer{buf},
+		TimestampFormat: customFormat,
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	logger.Info("test message")
-// 	logger.Flush()
+	logger.Info("test message")
+	logger.Flush()
 
-// 	output := buf.String()
+	output := buf.String()
 
-// 	// Try to parse the timestamp with our custom format
-// 	parts := strings.SplitN(output, " ", 2)
-// 	if len(parts) < 1 {
-// 		t.Fatal("Couldn't parse timestamp from log output")
-// 	}
+	// Try to parse the timestamp with our custom format
+	parts := strings.SplitN(output, " ", 2)
+	if len(parts) < 1 {
+		t.Fatal("Couldn't parse timestamp from log output")
+	}
 
-// 	_, err = time.Parse(customFormat, parts[0])
-// 	if err != nil {
-// 		t.Errorf("Timestamp %q doesn't match format %q: %v", parts[0], customFormat, err)
-// 	}
-// }
+	_, err = time.Parse(customFormat, parts[0])
+	if err != nil {
+		t.Errorf("Timestamp %q doesn't match format %q: %v", parts[0], customFormat, err)
+	}
+}
