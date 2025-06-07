@@ -25,6 +25,7 @@ The library is particularly well-suited for:
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [API Overview](#api-overview) 
 - [Log Levels](#log-levels)
 - [Usage Examples](#usage-examples)
 - [Performance](#performance)
@@ -209,6 +210,66 @@ Remember: You can change most settings dynamically after initialization using me
 Here's the enhanced section with detailed, user-friendly examples showcasing all major features:
 
 ---
+
+## 🤖 API Overview
+
+### Core Methods
+
+#### Logger Creation
+| Method | Description | Example |
+|--------|-------------|---------|
+| `NewGourdianLogger(config LoggerConfig)` | Creates logger with custom config | `logger, err := NewGourdianLogger(LoggerConfig{Filename: "app"})` |
+| `NewDefaultGourdianLogger()` | Creates logger with defaults | `logger, err := NewDefaultGourdianLogger()` |
+
+#### Basic Logging
+| Method | Description | Example |
+|--------|-------------|---------|
+| `Debug/Info/Warn/Error/Fatal` | Simple logging | `logger.Info("Service started")` |
+| `Debugf/Infof/Warnf/Errorf/Fatalf` | Formatted logging | `logger.Infof("User %s logged in", username)` |
+
+#### Structured Logging
+| Method | Description | Example |
+|--------|-------------|---------|
+| `*WithFields` | Log with additional fields | `logger.InfoWithFields(map[string]interface{}{"user": "john"}, "Login")` |
+| `*fWithFields` | Formatted with fields | `logger.InfofWithFields(fields, "Processed %d items", count)` |
+
+#### Control Methods
+| Method | Description | Example |
+|--------|-------------|---------|
+| `SetLogLevel()` | Change log level | `logger.SetLogLevel(gourdianlogger.WARN)` |
+| `GetLogLevel()` | Get current level | `level := logger.GetLogLevel()` |
+| `Flush()` | Ensure logs are written | `logger.Flush()` |
+| `Close()` | Clean shutdown | `defer logger.Close()` |
+| `Pause()/Resume()` | Temporary logging pause | `logger.Pause(); defer logger.Resume()` |
+
+#### Advanced Features
+| Method | Description | Example |
+|--------|-------------|---------|
+| `AddOutput()` | Add log destination | `logger.AddOutput(networkWriter)` |
+| `RemoveOutput()` | Remove destination | `logger.RemoveOutput(os.Stdout)` |
+| `SetDynamicLevelFunc()` | Dynamic log levels | `logger.SetDynamicLevelFunc(func() LogLevel { ... })` |
+
+### Helper Functions
+| Function | Description | Example |
+|----------|-------------|---------|
+| `ParseLogLevel()` | Convert string to LogLevel | `level, err := ParseLogLevel("info")` |
+| `LogLevel.String()` | Get level name | `fmt.Println(gourdianlogger.INFO.String())` |
+
+### Configuration Options
+| Field | Description | Default |
+|-------|-------------|---------|
+| `Filename` | Base log filename | "gourdianlogs" |
+| `MaxBytes` | Max file size before rotation | 10MB |
+| `BackupCount` | Number of rotated logs to keep | 5 |
+| `LogLevel` | Minimum log level | DEBUG |
+| `LogFormat` | Output format (PLAIN/JSON) | PLAIN |
+| `BufferSize` | Async buffer size (0=sync) | 0 |
+| `AsyncWorkers` | Async worker count | 1 |
+| `MaxLogRate` | Max logs per second | 0 (unlimited) |
+| `EnableCaller` | Include caller info | true |
+| `CustomFields` | Additional JSON fields | nil |
+
+> **Tip**: All configuration fields are optional - sensible defaults are provided.
 
 ## Log Levels
 
