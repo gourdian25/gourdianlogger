@@ -1,24 +1,22 @@
-# File: goReleaser.txt
-
 logan@WarHammer ~/gourdianlogger (master)> make release
-git tag v0.0.3
-git push origin v0.0.3
-Enumerating objects: 26, done.
-Counting objects: 100% (25/25), done.
+git tag v0.0.6
+git push origin v0.0.6
+Enumerating objects: 12, done.
+Counting objects: 100% (12/12), done.
 Delta compression using up to 8 threads
-Compressing objects: 100% (12/12), done.
-Writing objects: 100% (14/14), 11.54 KiB | 2.31 MiB/s, done.
-Total 14 (delta 9), reused 0 (delta 0), pack-reused 0
-remote: Resolving deltas: 100% (9/9), completed with 7 local objects.
+Compressing objects: 100% (7/7), done.
+Writing objects: 100% (7/7), 1.08 KiB | 277.00 KiB/s, done.
+Total 7 (delta 6), reused 0 (delta 0), pack-reused 0
+remote: Resolving deltas: 100% (6/6), completed with 5 local objects.
 To github.com:gourdian25/gourdianlogger.git
- * [new tag]         v0.0.3 -> v0.0.3
+ * [new tag]         v0.0.6 -> v0.0.6
 goreleaser release --clean
   • starting release...
   • loading                                          path=.goreleaser.yml
   • loading environment variables
     • using token from  $GITHUB_TOKEN 
   • getting and validating git state
-    • git state                                      commit=a64e5bc0085e2cce3bed9746af9af2be8b4068de branch=dev current_tag=v0.0.3 previous_tag=v0.0.2 dirty=false
+    • git state                                      commit=fd2fac95f158c4168047ea34da7966d041a0ef64 branch=master current_tag=v0.0.6 previous_tag=v0.0.2 dirty=false
   • parsing tag
   • setting defaults
   • running before hooks
@@ -40,12 +38,12 @@ goreleaser release --clean
   • calculating checksums
   • publishing
     • scm releases
-      • creating or updating release                 tag=v0.0.3 repo=gourdian25/gourdianlogger
-      • release created                              name=v0.0.3 release-id=223824864 request-id=F470:1EE435:882E60:B9626A:6844C5B3
-      • release updated                              name= release-id=223824864 request-id=F470:1EE435:882E7F:B96295:6844C5B4
-      • release created/updated                      url=https://github.com/gourdian25/gourdianlogger/releases/tag/v0.0.3 published=true
-      • took: 2s
-  • took: 2s
+      • creating or updating release                 tag=v0.0.6 repo=gourdian25/gourdianlogger
+      • release created                              name=v0.0.6 release-id=223825644 request-id=F46C:32E04D:8125D7:B2EB25:6844CB12
+      • release updated                              name= release-id=223825644 request-id=F46C:32E04D:812624:B2EB80:6844CB13
+      • release created/updated                      url=https://github.com/gourdian25/gourdianlogger/releases/tag/v0.0.6 published=true
+      • took: 3s
+  • took: 3s
   • storing artifacts metadata
     • writing                                        file=dist/artifacts.json
   • announcing
