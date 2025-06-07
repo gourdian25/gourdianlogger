@@ -619,9 +619,19 @@ func (l *Logger) cleanupOldBackups() {
 
 func (l *Logger) Flush() {
 	if l.asyncQueue != nil {
+		// Wait for the queue to be empty
 		for len(l.asyncQueue) > 0 {
 			time.Sleep(10 * time.Millisecond)
 		}
+
+		// Give async workers a moment to process any in-flight messages
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// If there are any async workers, wait for them to finish current work
+	if l.asyncWorkers > 0 {
+		// This gives time for any batch writes to complete
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

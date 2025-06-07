@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (81.4%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (82.2%)</option>
 				
 				</select>
 			</div>
@@ -689,11 +689,21 @@ func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
 }
 
 func (l *Logger) Flush() <span class="cov8" title="1">{
-        if l.asyncQueue != nil </span><span class="cov0" title="0">{
-                for len(l.asyncQueue) &gt; 0 </span><span class="cov0" title="0">{
+        if l.asyncQueue != nil </span><span class="cov8" title="1">{
+                // Wait for the queue to be empty
+                for len(l.asyncQueue) &gt; 0 </span><span class="cov8" title="1">{
                         time.Sleep(10 * time.Millisecond)
                 }</span>
+
+                // Give async workers a moment to process any in-flight messages
+                <span class="cov8" title="1">time.Sleep(100 * time.Millisecond)</span>
         }
+
+        // If there are any async workers, wait for them to finish current work
+        <span class="cov8" title="1">if l.asyncWorkers &gt; 0 </span><span class="cov8" title="1">{
+                // This gives time for any batch writes to complete
+                time.Sleep(100 * time.Millisecond)
+        }</span>
 }
 
 func (l *Logger) SetLogLevel(level LogLevel) <span class="cov8" title="1">{

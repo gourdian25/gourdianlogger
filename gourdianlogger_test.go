@@ -1078,6 +1078,46 @@ func TestNewDefaultGourdianLogger(t *testing.T) {
 	}
 }
 
+func TestFlush(t *testing.T) {
+	t.Run("AsyncQueueEmpty", func(t *testing.T) {
+		logger := &Logger{}
+		logger.Flush() // Should not panic
+	})
+
+	t.Run("AsyncQueueNotEmpty", func(t *testing.T) {
+		tempDir := t.TempDir()
+		buf := &bytes.Buffer{}
+
+		config := LoggerConfig{
+			LogsDir:      tempDir,
+			Outputs:      []io.Writer{buf},
+			BufferSize:   10,
+			AsyncWorkers: 1,
+		}
+
+		logger, err := NewGourdianLogger(config)
+		if err != nil {
+			t.Fatalf("Failed to create logger: %v", err)
+		}
+		defer logger.Close()
+
+		// Fill the async queue
+		for i := 0; i < 5; i++ {
+			logger.Info(fmt.Sprintf("message %d", i))
+		}
+
+		// Flush should wait for all messages to be processed
+		logger.Flush()
+
+		output := buf.String()
+		for i := 0; i < 5; i++ {
+			if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
+				t.Errorf("Missing message %d in output", i)
+			}
+		}
+	})
+}
+
 // func TestGetCallerInfo(t *testing.T) {
 // 	tests := []struct {
 // 		name         string
@@ -1118,46 +1158,6 @@ func TestNewDefaultGourdianLogger(t *testing.T) {
 // 			}
 // 		})
 // 	}
-// }
-
-// func TestFlush(t *testing.T) {
-// 	t.Run("AsyncQueueEmpty", func(t *testing.T) {
-// 		logger := &Logger{}
-// 		logger.Flush() // Should not panic
-// 	})
-
-// 	t.Run("AsyncQueueNotEmpty", func(t *testing.T) {
-// 		tempDir := t.TempDir()
-// 		buf := &bytes.Buffer{}
-
-// 		config := LoggerConfig{
-// 			LogsDir:      tempDir,
-// 			Outputs:      []io.Writer{buf},
-// 			BufferSize:   10,
-// 			AsyncWorkers: 1,
-// 		}
-
-// 		logger, err := NewGourdianLogger(config)
-// 		if err != nil {
-// 			t.Fatalf("Failed to create logger: %v", err)
-// 		}
-// 		defer logger.Close()
-
-// 		// Fill the async queue
-// 		for i := 0; i < 5; i++ {
-// 			logger.Info(fmt.Sprintf("message %d", i))
-// 		}
-
-// 		// Flush should wait for all messages to be processed
-// 		logger.Flush()
-
-// 		output := buf.String()
-// 		for i := 0; i < 5; i++ {
-// 			if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
-// 				t.Errorf("Missing message %d in output", i)
-// 			}
-// 		}
-// 	})
 // }
 
 // func TestFormatMethods(t *testing.T) {
