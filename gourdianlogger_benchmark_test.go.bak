@@ -12,8 +12,6 @@ import (
 
 // BenchmarkLogging benchmarks basic synchronous logging
 func BenchmarkLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
