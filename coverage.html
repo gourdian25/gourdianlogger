@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (59.2%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (64.7%)</option>
 				
 				</select>
 			</div>
@@ -370,21 +370,23 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
 
         for </span><span class="cov8" title="1">{
                 select </span>{
-                case buf := &lt;-l.asyncQueue:<span class="cov0" title="0">
+                case buf := &lt;-l.asyncQueue:<span class="cov8" title="1">
                         batch = append(batch, buf)
-                        if len(batch) &gt;= 100 </span><span class="cov0" title="0">{
+                        if len(batch) &gt;= 100 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                                 batch = batch[:0]
                         }</span>
-                case &lt;-ticker.C:<span class="cov0" title="0">
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                                 batch = batch[:0]
                         }</span>
                 case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
+                        // Process remaining messages
                         if len(batch) &gt; 0 </span><span class="cov0" title="0">{
                                 l.writeBatch(batch)
                         }</span>
+                        // Drain the queue
                         <span class="cov8" title="1">for </span><span class="cov8" title="1">{
                                 select </span>{
                                 case buf := &lt;-l.asyncQueue:<span class="cov8" title="1">
@@ -397,24 +399,18 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
         }
 }
 
-func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov0" title="0">{
+func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1">{
         l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
-        for _, buf := range buffers </span><span class="cov0" title="0">{
-                if l.closed.Load() </span><span class="cov0" title="0">{
-                        fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
-                        l.bufferPool.Put(buf)
-                        continue</span>
-                }
-
-                <span class="cov0" title="0">if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+        for _, buf := range buffers </span><span class="cov8" title="1">{
+                if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
                         l.handleError(fmt.Errorf("log write error: %w", err))
                         if l.fallbackWriter != nil </span><span class="cov0" title="0">{
                                 fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                         }</span>
                 }
-                <span class="cov0" title="0">l.bufferPool.Put(buf)</span>
+                <span class="cov8" title="1">l.bufferPool.Put(buf)</span>
         }
 }
 
@@ -422,19 +418,13 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
         l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
-        if l.closed.Load() </span><span class="cov8" title="1">{
-                fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
-                l.bufferPool.Put(buf)
-                return
-        }</span>
-
-        <span class="cov0" title="0">if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+        if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
                 l.handleError(fmt.Errorf("log write error: %w", err))
                 if l.fallbackWriter != nil </span><span class="cov0" title="0">{
                         fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                 }</span>
         }
-        <span class="cov0" title="0">l.bufferPool.Put(buf)</span>
+        <span class="cov8" title="1">l.bufferPool.Put(buf)</span>
 }
 
 func (l *Logger) handleError(err error) <span class="cov8" title="1">{
@@ -540,6 +530,11 @@ func (l *Logger) getCallerInfo() string <span class="cov0" title="0">{
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) <span class="cov8" title="1">{
         if l.paused.Load() </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        // Check closed status right before processing
+        <span class="cov8" title="1">if l.closed.Load() </span><span class="cov8" title="1">{
                 return
         }</span>
 
@@ -721,20 +716,33 @@ func (l *Logger) RemoveOutput(output io.Writer) <span class="cov8" title="1">{
                 }</span>
         }
 }
-
 func (l *Logger) Close() error <span class="cov8" title="1">{
         if !l.closed.CompareAndSwap(false, true) </span><span class="cov8" title="1">{
                 return nil
         }</span>
 
-        <span class="cov8" title="1">close(l.rotateCloseChan)
-        if l.asyncCloseChan != nil </span><span class="cov8" title="1">{
+        // First stop accepting new messages
+        <span class="cov8" title="1">if l.asyncCloseChan != nil </span><span class="cov8" title="1">{
                 close(l.asyncCloseChan)
         }</span>
+        <span class="cov8" title="1">close(l.rotateCloseChan)
 
-        <span class="cov8" title="1">l.wg.Wait()
+        // Wait for all workers to finish processing
+        done := make(chan struct{})
+        go func() </span><span class="cov8" title="1">{
+                l.wg.Wait()
+                close(done)
+        }</span>()
 
-        l.fileMu.Lock()
+        // Wait with timeout
+        <span class="cov8" title="1">select </span>{
+        case &lt;-done:<span class="cov8" title="1"></span>
+        case &lt;-time.After(5 * time.Second):<span class="cov0" title="0"></span>
+                // Timeout reached, proceed with closing anyway
+        }
+
+        // Now safely close the file
+        <span class="cov8" title="1">l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
         if l.file != nil </span><span class="cov8" title="1">{

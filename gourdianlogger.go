@@ -333,12 +333,6 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
 	defer l.fileMu.Unlock()
 
 	for _, buf := range buffers {
-		if l.closed.Load() {
-			fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
-			l.bufferPool.Put(buf)
-			continue
-		}
-
 		if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
 			l.handleError(fmt.Errorf("log write error: %w", err))
 			if l.fallbackWriter != nil {
@@ -352,12 +346,6 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
 func (l *Logger) writeBuffer(buf *bytes.Buffer) {
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
-
-	if l.closed.Load() {
-		fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", buf.String())
-		l.bufferPool.Put(buf)
-		return
-	}
 
 	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
 		l.handleError(fmt.Errorf("log write error: %w", err))
@@ -470,7 +458,12 @@ func (l *Logger) getCallerInfo() string {
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
-	if l.closed.Load() || l.paused.Load() {
+	if l.paused.Load() {
+		return
+	}
+
+	// Check closed status right before processing
+	if l.closed.Load() {
 		return
 	}
 
@@ -652,30 +645,32 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 		}
 	}
 }
-
 func (l *Logger) Close() error {
 	if !l.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 
+	// First stop accepting new messages
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
 	close(l.rotateCloseChan)
 
-	// Wait with timeout
+	// Wait for all workers to finish processing
 	done := make(chan struct{})
 	go func() {
 		l.wg.Wait()
 		close(done)
 	}()
 
+	// Wait with timeout
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		// Timeout reached, proceed with closing anyway
 	}
 
+	// Now safely close the file
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 

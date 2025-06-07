@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestLogLevelString tests the String() method of LogLevel
@@ -343,16 +344,23 @@ func TestAsyncLogging(t *testing.T) {
 		logger.Info(fmt.Sprintf("message %d", i))
 	}
 
+	// Give some time for messages to process
+	time.Sleep(100 * time.Millisecond)
+
 	// Close to flush all messages
 	logger.Close()
 
 	// Verify all messages were written
 	output := buf.String()
+	missing := 0
 	for i := 0; i < 150; i++ {
 		if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
-			t.Errorf("Missing message %d in output", i)
-			break
+			missing++
 		}
+	}
+
+	if missing > 0 {
+		t.Errorf("Missing %d messages in output", missing)
 	}
 }
 
