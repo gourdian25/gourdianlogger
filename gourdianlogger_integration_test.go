@@ -1304,53 +1304,94 @@ func TestIntegrationRotateWithClosedFile(t *testing.T) {
 	logger.Close()
 }
 
-// // TestIntegrationRotateWithFailedRename tests rotation when rename fails
-// func TestIntegrationRotateWithFailedRename(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	config := LoggerConfig{
-// 		LogsDir:     tempDir,
-// 		Filename:    "rotate_fail",
-// 		MaxBytes:    100,
-// 		BackupCount: 2,
-// 	}
+func TestIntegrationRotateWithFailedRename(t *testing.T) {
+	tempDir := t.TempDir()
+	config := LoggerConfig{
+		LogsDir:        tempDir,
+		Filename:       "rotate_fail",
+		MaxBytes:       100, // Very small size to force rotation
+		BackupCount:    2,
+		EnableFallback: true,
+		BufferSize:     0, // Ensure synchronous logging for test
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	// Fill the log file to trigger rotation
-// 	for i := 0; i < 50; i++ {
-// 		logger.Info("filling the log file to trigger rotation")
-// 	}
-// 	logger.Flush()
+	logPath := filepath.Join(tempDir, "rotate_fail.log")
 
-// 	// Simulate rename failure by making the directory read-only
-// 	if err := os.Chmod(tempDir, 0555); err != nil {
-// 		t.Fatalf("Failed to make directory read-only: %v", err)
-// 	}
-// 	defer os.Chmod(tempDir, 0755) // Clean up
+	// First verify we can write to the log
+	testMsg := "initial message " + time.Now().Format(time.RFC3339Nano)
+	logger.Info(testMsg)
+	logger.Flush()
 
-// 	// Try to rotate - should fail but recover
-// 	err = logger.rotateLogFiles()
-// 	if err == nil {
-// 		t.Error("Expected error when rotating with read-only dir, got nil")
-// 	}
+	// Verify initial message was written
+	initialContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read initial log file: %v", err)
+	}
+	if !strings.Contains(string(initialContent), testMsg) {
+		t.Fatalf("Initial message not found in log")
+	}
 
-// 	// Verify we can still log after failed rotation
-// 	logger.Info("message after failed rotation")
-// 	logger.Flush()
+	// Fill the log file to trigger rotation with messages that will exceed 100 bytes
+	longMsg := strings.Repeat("x", 50) // Each message is 50 bytes
+	for i := 0; i < 10; i++ {
+		logger.Info(longMsg)
+	}
+	logger.Flush()
 
-// 	// Verify the message made it to the log
-// 	content, err := os.ReadFile(filepath.Join(tempDir, "rotate_fail.log"))
-// 	if err != nil {
-// 		t.Fatalf("Failed to read log file: %v", err)
-// 	}
-// 	if !strings.Contains(string(content), "message after failed rotation") {
-// 		t.Error("Failed to log after rotation failure")
-// 	}
-// }
+	// Verify file is large enough to trigger rotation
+	fileInfo, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("Failed to get file info: %v", err)
+	}
+	t.Logf("Current log file size: %d bytes", fileInfo.Size())
+
+	// Simulate rename failure by making the directory read-only
+	if err := os.Chmod(tempDir, 0555); err != nil {
+		t.Fatalf("Failed to make directory read-only: %v", err)
+	}
+	defer os.Chmod(tempDir, 0755) // Clean up
+
+	// Manually trigger rotation
+	logger.fileMu.Lock()
+	rotateErr := logger.rotateLogFiles()
+	logger.fileMu.Unlock()
+
+	if rotateErr == nil {
+		t.Error("Expected error when rotating with read-only dir, got nil")
+	} else {
+		t.Logf("Rotation failed as expected: %v", rotateErr)
+	}
+
+	// Restore permissions so we can continue testing
+	if err := os.Chmod(tempDir, 0755); err != nil {
+		t.Fatalf("Failed to restore directory permissions: %v", err)
+	}
+
+	// Verify we can still log after failed rotation
+	finalMsg := "message after failed rotation " + time.Now().Format(time.RFC3339Nano)
+	logger.Info(finalMsg)
+	logger.Flush()
+
+	// Verify the message made it to the log
+	finalContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read final log file: %v", err)
+	}
+	if !strings.Contains(string(finalContent), finalMsg) {
+		t.Errorf("Final message not found in log. Content:\n%s", string(finalContent))
+	}
+
+	// Verify the original file still exists (rotation failed)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Error("Original log file was deleted despite failed rotation")
+	}
+}
 
 // // TestIntegrationRotateLogFiles tests the rotateLogFiles function
 // func TestIntegrationRotateLogFiles(t *testing.T) {

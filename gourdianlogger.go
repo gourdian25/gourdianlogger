@@ -588,20 +588,19 @@ func (l *Logger) rotateLogFiles() error {
 	backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
 	// Rename current file to backup
-	if err := os.Rename(l.baseFilename, backupPath); err != nil {
-		// If rename fails, try to reopen the original file
-		file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if openErr != nil {
-			return fmt.Errorf("failed to rename log file (%v) and couldn't reopen original (%v)", err, openErr)
-		}
-		l.file = file
-		return fmt.Errorf("failed to rename log file: %w", err)
-	}
+	renameErr := os.Rename(l.baseFilename, backupPath)
 
-	// Create new log file
-	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to create new log file: %w", err)
+	// Try to reopen the file regardless of whether rename succeeded
+	file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if openErr != nil {
+		// If we can't reopen the file, try to reopen the original file we just closed
+		if renameErr == nil {
+			if recoveredFile, err := os.OpenFile(backupPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				l.file = recoveredFile
+				return fmt.Errorf("failed to create new log file (%v), recovered original: %w", openErr, renameErr)
+			}
+		}
+		return fmt.Errorf("failed to create new log file and couldn't recover original: %w", openErr)
 	}
 
 	// Update logger state
@@ -616,6 +615,10 @@ func (l *Logger) rotateLogFiles() error {
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
 	l.outputsMu.Unlock()
+
+	if renameErr != nil {
+		return fmt.Errorf("failed to rename log file but continued logging: %w", renameErr)
+	}
 
 	// Clean up old backups
 	l.cleanupOldBackups()
