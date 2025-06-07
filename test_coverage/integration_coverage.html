@@ -1,5 +1,3 @@
-<!-- File: test_coverage/integration_coverage.html -->
-
 
 <!DOCTYPE html>
 <html>
@@ -57,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (73.1%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (73.4%)</option>
 				
 				</select>
 			</div>
@@ -228,19 +226,58 @@ func ParseLogLevel(level string) (LogLevel, error) <span class="cov0" title="0">
 }
 
 // NewGourdianLogger creates a new Logger with the specified configuration.
-// The configuration is validated and defaults are applied for missing values.
+// The configuration is validated and sensible defaults are applied for any missing values.
 //
-// Example:
+// Default values used when not specified in config:
+//   - Filename: "gourdianlogs" (without .log extension)
+//   - MaxBytes: 10MB (10 * 1024 * 1024)
+//   - BackupCount: 5 (keep 5 rotated log files)
+//   - LogLevel: DEBUG (log all levels)
+//   - TimestampFormat: "2006-01-02 15:04:05.000000" (microsecond precision)
+//   - LogsDir: "logs" (directory where log files are stored)
+//   - EnableCaller: true (include caller information)
+//   - BufferSize: 0 (synchronous logging)
+//   - AsyncWorkers: 1 (if BufferSize &gt; 0)
+//   - LogFormat: FormatPlain (plain text format)
+//   - EnableFallback: true (fallback to stderr on errors)
+//   - MaxLogRate: 0 (no rate limiting)
 //
-//        config := LoggerConfig{
-//            Filename: "myapp",
-//            LogLevel: INFO,
-//            MaxBytes: 5 * 1024 * 1024, // 5MB
+// The function performs the following operations:
+//  1. Validates the configuration
+//  2. Applies defaults for missing values
+//  3. Creates the log directory if it doesn't exist
+//  4. Opens/Creates the log file
+//  5. Initializes all logger components
+//  6. Starts background workers if needed
+//
+// Example with custom configuration:
+//
+//        config := gourdianlogger.LoggerConfig{
+//            Filename: "myapp",                // Creates myapp.log
+//            LogsDir: "var/logs",              // Stores logs in var/logs/
+//            MaxBytes: 20 * 1024 * 1024,       // 20MB rotation size
+//            BackupCount: 10,                  // Keep 10 rotated logs
+//            LogLevel: gourdianlogger.INFO,    // Only log INFO and above
+//            AsyncWorkers: 4,                  // Use 4 async workers
+//            BufferSize: 1000,                 // Buffer up to 1000 messages
+//            EnableCaller: false,              // Disable caller info
+//            LogFormat: gourdianlogger.FormatJSON, // JSON format
+//            MaxLogRate: 1000,                 // Limit to 1000 logs/second
+//            CustomFields: map[string]interface{}{
+//                "app": "myapp",
+//                "version": "1.0.0",
+//            },
 //        }
-//        logger, err := NewGourdianLogger(config)
+//
+//        logger, err := gourdianlogger.NewGourdianLogger(config)
 //        if err != nil {
-//            panic(err)
+//            panic(fmt.Errorf("failed to create logger: %w", err))
 //        }
+//        defer logger.Close()
+//
+//        // Usage:
+//        logger.Info("Application started")
+//        logger.Debugf("Config loaded: %+v", config) // Won't be logged due to INFO level
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" title="1">{
         if err := config.Validate(); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid config: %w", err)
@@ -338,16 +375,46 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         <span class="cov8" title="1">return logger, nil</span>
 }
 
-// NewDefaultGourdianLogger creates a new Logger with default configuration.
-// This is the simplest way to create a logger with sensible defaults.
+// NewDefaultGourdianLogger creates a new Logger with all default settings.
+// This is the quickest way to get started with basic logging functionality.
+//
+// Default configuration:
+//   - Logs to "logs/gourdianlogs.log"
+//   - 10MB file rotation
+//   - Keeps 5 backup logs
+//   - DEBUG level logging
+//   - Plain text format
+//   - Includes caller information
+//   - Synchronous logging (no buffering)
+//   - Falls back to stderr on errors
+//   - No rate limiting
 //
 // Example:
 //
-//        logger, err := NewDefaultGourdianLogger()
+//        // Simple usage with defaults:
+//        logger, err := gourdianlogger.NewDefaultGourdianLogger()
 //        if err != nil {
-//            panic(err)
+//            panic(fmt.Errorf("failed to create logger: %w", err))
 //        }
 //        defer logger.Close()
+//
+//        // Basic logging:
+//        logger.Debug("Debug message")      // Will be logged
+//        logger.Info("Informational message")
+//        logger.Warn("Warning message")
+//        logger.Error("Error message")
+//
+//        // Formatted logging:
+//        logger.Infof("User %s logged in at %v", "john", time.Now())
+//
+//        // With fields (structured logging):
+//        logger.InfoWithFields(map[string]interface{}{
+//            "user": "john",
+//            "ip": "192.168.1.1",
+//        }, "User login")
+//
+// Note: Remember to call Close() when done to ensure all logs are flushed
+// and resources are properly released.
 func NewDefaultGourdianLogger() (*Logger, error) <span class="cov0" title="0">{
         config := LoggerConfig{
                 Filename:        defaultFileName,
@@ -434,7 +501,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                         }</span>
                 case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
                         // Process remaining messages
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                         }</span>
                         // Drain the queue
