@@ -1,1 +1,1 @@
-{"project_name":"gourdianlogger","tag":"v0.0.3","previous_tag":"v0.0.2","version":"0.0.3","commit":"a64e5bc0085e2cce3bed9746af9af2be8b4068de","date":"2025-06-07T23:05:22.142396304Z","runtime":{"goos":"linux","goarch":"amd64"}}
+{"project_name":"gourdianlogger","tag":"v0.0.5","previous_tag":"v0.0.3","version":"0.0.5","commit":"fa6b79ccb08cd6f676e5cba371e563609e191088","date":"2025-06-07T23:14:53.850248355Z","runtime":{"goos":"linux","goarch":"amd64"}}
