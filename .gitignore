@@ -3,4 +3,4 @@ logs/
 *.logs
 *.log
 
-tt_backups/
+.tt_backups/
