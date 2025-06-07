@@ -1,3 +1,5 @@
+<!-- File: coverage.html -->
+
 
 <!DOCTYPE html>
 <html>
@@ -55,7 +57,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (90.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (91.2%)</option>
 				
 				</select>
 			</div>
@@ -227,7 +229,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         <span class="cov8" title="1">if config.Filename == "" </span><span class="cov8" title="1">{
                 config.Filename = "gourdianlogs"
         }</span>
-        <span class="cov8" title="1">if config.AsyncWorkers &lt;= 0 &amp;&amp; config.BufferSize &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.AsyncWorkers &lt;= 0 &amp;&amp; config.BufferSize &gt; 0 </span><span class="cov8" title="1">{
                 config.AsyncWorkers = 1
         }</span>
 
@@ -535,7 +537,7 @@ func (l *Logger) getCallerInfo() string <span class="cov8" title="1">{
 
         // Extract just the function name without package path
         <span class="cov8" title="1">fnName := fn.Name()
-        if lastSlash := strings.LastIndex(fnName, "/"); lastSlash &gt;= 0 </span><span class="cov0" title="0">{
+        if lastSlash := strings.LastIndex(fnName, "/"); lastSlash &gt;= 0 </span><span class="cov8" title="1">{
                 fnName = fnName[lastSlash+1:]
         }</span>
         <span class="cov8" title="1">if lastDot := strings.LastIndex(fnName, "."); lastDot &gt;= 0 </span><span class="cov8" title="1">{
@@ -574,7 +576,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
         }</span>
 
         <span class="cov8" title="1">var callerInfo string
-        if l.enableCaller </span><span class="cov0" title="0">{
+        if l.enableCaller </span><span class="cov8" title="1">{
                 callerInfo = l.getCallerInfo()
         }</span>
 
