@@ -449,18 +449,12 @@ func (l *Logger) getCallerInfo() string {
 		return fmt.Sprintf("%s:%d", filepath.Base(file), line)
 	}
 
-	// Get full function name with package path
 	fullFnName := fn.Name()
+	if lastSlash := strings.LastIndex(fullFnName, "/"); lastSlash >= 0 {
+		fullFnName = fullFnName[lastSlash+1:]
+	}
 
-	// Extract just the last part of the package path and function name
-	parts := strings.Split(fullFnName, "/")
-	lastPart := parts[len(parts)-1]
-
-	// Further split on . to handle method receivers
-	nameParts := strings.Split(lastPart, ".")
-	functionName := nameParts[len(nameParts)-1]
-
-	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, functionName)
+	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName)
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
@@ -468,6 +462,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
+	// Check closed status right before processing
 	if l.closed.Load() {
 		return
 	}
@@ -476,14 +471,10 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
-	// Get the current level - check dynamic function first if set
-	var currentLevel LogLevel
+	currentLevel := LogLevel(l.level.Load())
 	if l.dynamicLevelFn != nil {
 		currentLevel = l.dynamicLevelFn()
-	} else {
-		currentLevel = LogLevel(l.level.Load())
 	}
-
 	if level < currentLevel {
 		return
 	}
@@ -546,20 +537,16 @@ func (l *Logger) rotateLogFiles() error {
 		return nil
 	}
 
-	// Close current file
 	oldFile := l.file
 	if err := oldFile.Close(); err != nil {
 		return fmt.Errorf("failed to close log file: %w", err)
 	}
 
-	// Create new filename with timestamp
 	base := strings.TrimSuffix(l.baseFilename, ".log")
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
-	// Rename current file to backup
 	if err := os.Rename(l.baseFilename, backupPath); err != nil {
-		// If rename fails, try to reopen the original file
 		file, openErr := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if openErr != nil {
 			return fmt.Errorf("failed to rename log file (%v) and couldn't reopen original (%v)", err, openErr)
@@ -568,26 +555,22 @@ func (l *Logger) rotateLogFiles() error {
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
-	// Create new log file
 	file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to create new log file: %w", err)
 	}
 
-	// Update logger state
 	l.file = file
 
-	// Update multiWriter with new file
 	l.outputsMu.Lock()
-	outputs := []io.Writer{file}
-	if len(l.outputs) > 1 { // Keep other outputs
-		outputs = append(outputs, l.outputs[1:]...)
+	outputs := []io.Writer{os.Stdout, file}
+	if len(l.outputs) > 2 {
+		outputs = append(outputs, l.outputs[2:]...)
 	}
 	l.outputs = outputs
 	l.multiWriter = io.MultiWriter(outputs...)
 	l.outputsMu.Unlock()
 
-	// Clean up old backups
 	l.cleanupOldBackups()
 	return nil
 }
@@ -800,3 +783,205 @@ func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, 
 	// l.Flush()
 	// os.Exit(1)
 }
+
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestCallerInfo$ github.com/gourdian25/gourdianlogger
+
+=== RUN   TestCallerInfo
+2025-06-07 14:40:41.184362 [INFO] /home/logan/gourdianlogger/gourdianlogger_test.go:832:gourdianlogger.TestCallerInfo.func1:test message with caller
+    /home/logan/gourdianlogger/gourdianlogger_test.go:843: Function name not found in caller info
+--- FAIL: TestCallerInfo (0.00s)
+FAIL
+FAIL    github.com/gourdian25/gourdianlogger    0.012s
+
+
+
+
+func TestCallerInfo(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		EnableCaller: true,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// This function will appear in the caller info
+	logTestMessage := func() {
+		logger.Info("test message with caller")
+	}
+
+	logTestMessage()
+	logger.Flush()
+
+	output := buf.String()
+	if !strings.Contains(output, "logger_test.go") {
+		t.Error("Caller info not found in log output")
+	}
+	if !strings.Contains(output, "logTestMessage") {
+		t.Error("Function name not found in caller info")
+	}
+}
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestDynamicLogLevel$ github.com/gourdian25/gourdianlogger
+
+=== RUN   TestDynamicLogLevel
+2025-06-07 14:41:38.953265 [INFO] info message 1
+2025-06-07 14:41:38.953394 [INFO] info message 2
+    /home/logan/gourdianlogger/gourdianlogger_test.go:933: Info message 1 should not be logged
+    /home/logan/gourdianlogger/gourdianlogger_test.go:936: Debug message 2 should be logged
+--- FAIL: TestDynamicLogLevel (0.00s)
+FAIL
+FAIL    github.com/gourdian25/gourdianlogger    0.006s
+
+
+
+func TestDynamicLogLevel(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:  tempDir,
+		Outputs:  []io.Writer{buf},
+		LogLevel: INFO,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Set dynamic level function that changes between calls
+	counter := 0
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		counter++
+		if counter%2 == 0 {
+			return DEBUG
+		}
+		return ERROR
+	})
+
+	// These should be filtered based on dynamic level
+	logger.Debug("debug message 1") // Shouldn't log (dynamic level ERROR)
+	logger.Info("info message 1")   // Shouldn't log (dynamic level ERROR)
+	logger.Debug("debug message 2") // Should log (dynamic level DEBUG)
+	logger.Info("info message 2")   // Should log (dynamic level DEBUG)
+
+	logger.Flush()
+
+	output := buf.String()
+
+	if strings.Contains(output, "debug message 1") {
+		t.Error("Debug message 1 should not be logged")
+	}
+	if strings.Contains(output, "info message 1") {
+		t.Error("Info message 1 should not be logged")
+	}
+	if !strings.Contains(output, "debug message 2") {
+		t.Error("Debug message 2 should be logged")
+	}
+	if !strings.Contains(output, "info message 2") {
+		t.Error("Info message 2 should be logged")
+	}
+}
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestFileRotationSignal$ github.com/gourdian25/gourdianlogger
+
+=== RUN   TestFileRotationSignal
+    /home/logan/gourdianlogger/gourdianlogger_test.go:973: Expected 1 backup file after rotation, got 0
+--- FAIL: TestFileRotationSignal (0.10s)
+FAIL
+FAIL    github.com/gourdian25/gourdianlogger    0.106s
+
+
+
+func TestFileRotationSignal(t *testing.T) {
+	tempDir := t.TempDir()
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Filename:    "rotation_signal_test",
+		MaxBytes:    1000,
+		BackupCount: 1,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Manually trigger rotation
+	logger.rotateChan <- struct{}{}
+
+	// Give some time for rotation to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Check if rotation occurred by looking for backup file
+	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
+	backups, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Failed to find backup files: %v", err)
+	}
+
+	if len(backups) != 1 {
+		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
+	}
+}
+
+
+Running tool: /usr/local/go/bin/go test -timeout 30s -run ^TestFileRotationSignaling$ github.com/gourdian25/gourdianlogger
+
+=== RUN   TestFileRotationSignaling
+    /home/logan/gourdianlogger/gourdianlogger_test.go:1008: Rotation signal did not result in backup file creation
+--- FAIL: TestFileRotationSignaling (0.10s)
+FAIL
+FAIL    github.com/gourdian25/gourdianlogger    0.114s
+
+
+func TestFileRotationSignaling(t *testing.T) {
+	tempDir := t.TempDir()
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Filename:    "rotation_signal_test",
+		MaxBytes:    50, // Very small to force rotation
+		BackupCount: 1,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Manually trigger rotation
+	logger.fileMu.Lock()
+	logger.rotateChan <- struct{}{}
+	logger.fileMu.Unlock()
+
+	// Give time for rotation to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Check if rotation occurred by looking for backup file
+	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
+	backups, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Error checking for backup files: %v", err)
+	}
+	if len(backups) == 0 {
+		t.Error("Rotation signal did not result in backup file creation")
+	}
+}
+

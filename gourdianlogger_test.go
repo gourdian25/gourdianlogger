@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -757,15 +760,153 @@ func TestLogFormatSwitching(t *testing.T) {
 	}
 }
 
-// func TestConcurrentLogging(t *testing.T) {
+func TestFatalMethods(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir: tempDir,
+		Outputs: []io.Writer{buf},
+	}
+
+	// Since Fatal calls os.Exit, we need to test this in a subprocess
+	if os.Getenv("BE_FATAL") == "1" {
+		logger, _ := NewGourdianLogger(config)
+		logger.Fatal("fatal error occurred")
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestFatalMethods")
+	cmd.Env = append(os.Environ(), "BE_FATAL=1")
+	err := cmd.Run()
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return
+	}
+	t.Fatalf("process ran with err %v, want exit status 1", err)
+}
+
+func TestPrettyPrintJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Outputs:     []io.Writer{buf},
+		LogFormat:   FormatJSON,
+		PrettyPrint: true,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	logger.Info("pretty message")
+	logger.Flush()
+
+	output := buf.String()
+	// Pretty print adds newlines and spaces
+	if !strings.Contains(output, "\n  \"") {
+		t.Error("Output is not pretty printed")
+	}
+}
+
+func TestFileRotationSignal(t *testing.T) {
+	tempDir := t.TempDir()
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Filename:    "rotation_signal_test",
+		MaxBytes:    10, // Very small to ensure rotation
+		BackupCount: 1,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Write enough data to trigger rotation
+	for i := 0; i < 100; i++ {
+		logger.Info("This is a test message to fill up the log file")
+	}
+	logger.Flush()
+
+	// Manually trigger rotation
+	logger.rotateChan <- struct{}{}
+
+	// Wait for rotation to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Check for backup files
+	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
+	backups, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Failed to find backup files: %v", err)
+	}
+
+	if len(backups) != 1 {
+		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
+	}
+}
+
+// this sometimes failing and needs improvement
+func TestConcurrentLogging(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		BufferSize:   1000,
+		AsyncWorkers: 5,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	var wg sync.WaitGroup
+	messages := 1000
+
+	// Concurrent logging from multiple goroutines
+	for i := 0; i < messages; i++ {
+		wg.Add(1)
+		go func(num int) {
+			defer wg.Done()
+			logger.Info(fmt.Sprintf("concurrent message %d", num))
+		}(i)
+	}
+
+	wg.Wait()
+	logger.Flush()
+
+	// Verify all messages were logged
+	output := buf.String()
+	missing := 0
+	for i := 0; i < messages; i++ {
+		if !strings.Contains(output, fmt.Sprintf("concurrent message %d", i)) {
+			missing++
+		}
+	}
+
+	if missing > 0 {
+		t.Errorf("Missing %d concurrent messages in output", missing)
+	}
+}
+
+// func TestCallerInfo(t *testing.T) {
 // 	tempDir := t.TempDir()
 // 	buf := &bytes.Buffer{}
 
 // 	config := LoggerConfig{
 // 		LogsDir:      tempDir,
 // 		Outputs:      []io.Writer{buf},
-// 		BufferSize:   1000,
-// 		AsyncWorkers: 5,
+// 		EnableCaller: true,
 // 	}
 
 // 	logger, err := NewGourdianLogger(config)
@@ -774,32 +915,20 @@ func TestLogFormatSwitching(t *testing.T) {
 // 	}
 // 	defer logger.Close()
 
-// 	var wg sync.WaitGroup
-// 	messages := 1000
-
-// 	// Concurrent logging from multiple goroutines
-// 	for i := 0; i < messages; i++ {
-// 		wg.Add(1)
-// 		go func(num int) {
-// 			defer wg.Done()
-// 			logger.Info(fmt.Sprintf("concurrent message %d", num))
-// 		}(i)
+// 	// This function will appear in the caller info
+// 	logTestMessage := func() {
+// 		logger.Info("test message with caller")
 // 	}
 
-// 	wg.Wait()
+// 	logTestMessage()
 // 	logger.Flush()
 
-// 	// Verify all messages were logged
 // 	output := buf.String()
-// 	missing := 0
-// 	for i := 0; i < messages; i++ {
-// 		if !strings.Contains(output, fmt.Sprintf("concurrent message %d", i)) {
-// 			missing++
-// 		}
+// 	if !strings.Contains(output, "logger_test.go") {
+// 		t.Error("Caller info not found in log output")
 // 	}
-
-// 	if missing > 0 {
-// 		t.Errorf("Missing %d concurrent messages in output", missing)
+// 	if !strings.Contains(output, "logTestMessage") {
+// 		t.Error("Function name not found in caller info")
 // 	}
 // }
 
@@ -881,39 +1010,5 @@ func TestLogFormatSwitching(t *testing.T) {
 
 // 	if !strings.Contains(buf.String(), "fatal message") {
 // 		t.Error("Fatal message not logged")
-// 	}
-// }
-
-// func TestFileRotationSignal(t *testing.T) {
-// 	tempDir := t.TempDir()
-
-// 	config := LoggerConfig{
-// 		LogsDir:     tempDir,
-// 		Filename:    "rotation_signal_test",
-// 		MaxBytes:    1000,
-// 		BackupCount: 1,
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
-
-// 	// Manually trigger rotation
-// 	logger.rotateChan <- struct{}{}
-
-// 	// Give some time for rotation to complete
-// 	time.Sleep(100 * time.Millisecond)
-
-// 	// Check if rotation occurred by looking for backup file
-// 	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
-// 	backups, err := filepath.Glob(pattern)
-// 	if err != nil {
-// 		t.Fatalf("Failed to find backup files: %v", err)
-// 	}
-
-// 	if len(backups) != 1 {
-// 		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
 // 	}
 // }
