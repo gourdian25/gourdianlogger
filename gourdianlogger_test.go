@@ -17,13 +17,6 @@ import (
 	"time"
 )
 
-// // failingWriter is an io.Writer that always fails
-// type failingWriter struct{}
-
-// func (w *failingWriter) Write(p []byte) (n int, err error) {
-// 	return 0, errors.New("simulated write error")
-// }
-
 // failingWriter is an io.Writer that always fails
 type failingWriter struct{}
 
