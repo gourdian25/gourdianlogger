@@ -914,6 +914,78 @@ func TestConcurrentLogging(t *testing.T) {
 	}
 }
 
+func TestFileRotationSignal(t *testing.T) {
+	tempDir := t.TempDir()
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Filename:    "rotation_signal_test",
+		MaxBytes:    10, // Very small to ensure rotation
+		BackupCount: 1,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Write enough data to trigger rotation
+	for i := 0; i < 100; i++ {
+		logger.Info("This is a test message to fill up the log file")
+	}
+	logger.Flush()
+
+	// Manually trigger rotation
+	logger.rotateChan <- struct{}{}
+
+	// Wait for rotation to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Check for backup files
+	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
+	backups, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Failed to find backup files: %v", err)
+	}
+
+	if len(backups) != 1 {
+		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
+	}
+}
+
+func TestRateLimiting(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:    tempDir,
+		Outputs:    []io.Writer{buf},
+		MaxLogRate: 10, // 10 logs per second
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Log more messages than the rate limit
+	for i := 0; i < 20; i++ {
+		logger.Info(fmt.Sprintf("message %d", i))
+	}
+
+	logger.Flush()
+
+	// Count the number of messages that got through
+	output := buf.String()
+	count := strings.Count(output, "message")
+
+	if count > 12 { // Allow some slight overflow
+		t.Errorf("Expected <=12 messages due to rate limiting, got %d", count)
+	}
+}
+
 // func TestCallerInfo(t *testing.T) {
 // 	tempDir := t.TempDir()
 // 	buf := &bytes.Buffer{}
@@ -975,77 +1047,5 @@ func TestConcurrentLogging(t *testing.T) {
 
 // 	if !strings.Contains(buf.String(), "fatal message") {
 // 		t.Error("Fatal message not logged")
-// 	}
-// }
-
-// func TestFileRotationSignal(t *testing.T) {
-// 	tempDir := t.TempDir()
-
-// 	config := LoggerConfig{
-// 		LogsDir:     tempDir,
-// 		Filename:    "rotation_signal_test",
-// 		MaxBytes:    10, // Very small to ensure rotation
-// 		BackupCount: 1,
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
-
-// 	// Write enough data to trigger rotation
-// 	for i := 0; i < 100; i++ {
-// 		logger.Info("This is a test message to fill up the log file")
-// 	}
-// 	logger.Flush()
-
-// 	// Manually trigger rotation
-// 	logger.rotateChan <- struct{}{}
-
-// 	// Wait for rotation to complete
-// 	time.Sleep(100 * time.Millisecond)
-
-// 	// Check for backup files
-// 	pattern := filepath.Join(tempDir, "rotation_signal_test_*.log")
-// 	backups, err := filepath.Glob(pattern)
-// 	if err != nil {
-// 		t.Fatalf("Failed to find backup files: %v", err)
-// 	}
-
-// 	if len(backups) != 1 {
-// 		t.Errorf("Expected 1 backup file after rotation, got %d", len(backups))
-// 	}
-// }
-
-// func TestRateLimiting(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
-
-// 	config := LoggerConfig{
-// 		LogsDir:    tempDir,
-// 		Outputs:    []io.Writer{buf},
-// 		MaxLogRate: 10, // 10 logs per second
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
-
-// 	// Log more messages than the rate limit
-// 	for i := 0; i < 20; i++ {
-// 		logger.Info(fmt.Sprintf("message %d", i))
-// 	}
-
-// 	logger.Flush()
-
-// 	// Count the number of messages that got through
-// 	output := buf.String()
-// 	count := strings.Count(output, "message")
-
-// 	if count > 12 { // Allow some slight overflow
-// 		t.Errorf("Expected <=12 messages due to rate limiting, got %d", count)
 // 	}
 // }

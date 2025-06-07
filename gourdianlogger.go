@@ -476,7 +476,14 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
-	// Get the current level - check dynamic function first if set
+	// Check rate limiting before doing any work
+	if l.rateLimiter != nil {
+		if !l.rateLimiter.Allow() {
+			return // Silently drop the message if rate limited
+		}
+	}
+
+	// Rest of the existing log method...
 	var currentLevel LogLevel
 	if l.dynamicLevelFn != nil {
 		currentLevel = l.dynamicLevelFn()
@@ -484,7 +491,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		currentLevel = LogLevel(l.level.Load())
 	}
 
-	// Check if the message level is below the current level
 	if level < currentLevel {
 		return
 	}

@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.8%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (78.3%)</option>
 				
 				</select>
 			</div>
@@ -279,7 +279,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
                 logger.fallbackWriter = os.Stderr
         }</span>
 
-        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov8" title="1">{
                 logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
         }</span>
 
@@ -350,14 +350,14 @@ func (l *Logger) fileSizeRotationWorker() <span class="cov8" title="1">{
         defer l.wg.Done()
         for </span><span class="cov8" title="1">{
                 select </span>{
-                case &lt;-l.rotateChan:<span class="cov0" title="0">
+                case &lt;-l.rotateChan:<span class="cov8" title="1">
                         l.fileMu.Lock()
-                        if l.file != nil </span><span class="cov0" title="0">{
+                        if l.file != nil </span><span class="cov8" title="1">{
                                 if err := l.rotateLogFiles(); err != nil </span><span class="cov0" title="0">{
                                         l.handleError(fmt.Errorf("log rotation failed: %w", err))
                                 }</span>
                         }
-                        <span class="cov0" title="0">l.fileMu.Unlock()</span>
+                        <span class="cov8" title="1">l.fileMu.Unlock()</span>
                 case &lt;-l.rotateCloseChan:<span class="cov8" title="1">
                         return</span>
                 }
@@ -379,7 +379,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                                 batch = batch[:0]
                         }</span>
                 case &lt;-ticker.C:<span class="cov8" title="1">
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                                 batch = batch[:0]
                         }</span>
@@ -547,7 +547,14 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 return
         }</span>
 
-        // Get the current level - check dynamic function first if set
+        // Check rate limiting before doing any work
+        <span class="cov8" title="1">if l.rateLimiter != nil </span><span class="cov8" title="1">{
+                if !l.rateLimiter.Allow() </span><span class="cov8" title="1">{
+                        return // Silently drop the message if rate limited
+                }</span>
+        }
+
+        // Rest of the existing log method...
         <span class="cov8" title="1">var currentLevel LogLevel
         if l.dynamicLevelFn != nil </span><span class="cov8" title="1">{
                 currentLevel = l.dynamicLevelFn()
@@ -555,7 +562,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 currentLevel = LogLevel(l.level.Load())
         }</span>
 
-        // Check if the message level is below the current level
         <span class="cov8" title="1">if level &lt; currentLevel </span><span class="cov8" title="1">{
                 return
         }</span>
@@ -604,28 +610,28 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
         }</span>
 }
 
-func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
+func (l *Logger) rotateLogFiles() error <span class="cov8" title="1">{
         if l.file == nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("log file not open")
         }</span>
 
-        <span class="cov0" title="0">fileInfo, err := l.file.Stat()
+        <span class="cov8" title="1">fileInfo, err := l.file.Stat()
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to get file info: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if fileInfo.Size() &lt; l.maxBytes </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if fileInfo.Size() &lt; l.maxBytes </span><span class="cov0" title="0">{
                 return nil
         }</span>
 
         // Close current file
-        <span class="cov0" title="0">oldFile := l.file
+        <span class="cov8" title="1">oldFile := l.file
         if err := oldFile.Close(); err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to close log file: %w", err)
         }</span>
 
         // Create new filename with timestamp
-        <span class="cov0" title="0">base := strings.TrimSuffix(l.baseFilename, ".log")
+        <span class="cov8" title="1">base := strings.TrimSuffix(l.baseFilename, ".log")
         timestamp := time.Now().Format("20060102_150405")
         backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
@@ -641,21 +647,21 @@ func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
         }
 
         // Create new log file
-        <span class="cov0" title="0">file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+        <span class="cov8" title="1">file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to create new log file: %w", err)
         }</span>
 
         // Update logger state
-        <span class="cov0" title="0">l.file = file
+        <span class="cov8" title="1">l.file = file
 
         // Update multiWriter with new file
         l.outputsMu.Lock()
         outputs := []io.Writer{file}
-        if len(l.outputs) &gt; 1 </span><span class="cov0" title="0">{ // Keep other outputs
+        if len(l.outputs) &gt; 1 </span><span class="cov8" title="1">{ // Keep other outputs
                 outputs = append(outputs, l.outputs[1:]...)
         }</span>
-        <span class="cov0" title="0">l.outputs = outputs
+        <span class="cov8" title="1">l.outputs = outputs
         l.multiWriter = io.MultiWriter(outputs...)
         l.outputsMu.Unlock()
 
@@ -664,10 +670,10 @@ func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
         return nil</span>
 }
 
-func (l *Logger) cleanupOldBackups() <span class="cov0" title="0">{
+func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
         pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log"
         files, err := filepath.Glob(pattern)
-        if err != nil || len(files) &lt;= l.backupCount </span><span class="cov0" title="0">{
+        if err != nil || len(files) &lt;= l.backupCount </span><span class="cov8" title="1">{
                 return
         }</span>
 
