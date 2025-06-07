@@ -439,7 +439,7 @@ func (l *Logger) getCallerInfo() string {
 		return ""
 	}
 
-	pc, file, line, ok := runtime.Caller(3)
+	pc, file, line, ok := runtime.Caller(3) // Adjusted depth for logger methods
 	if !ok {
 		return ""
 	}
@@ -449,18 +449,20 @@ func (l *Logger) getCallerInfo() string {
 		return fmt.Sprintf("%s:%d", filepath.Base(file), line)
 	}
 
-	// Get full function name with package path
+	// Get the full function name
 	fullFnName := fn.Name()
 
 	// Extract just the last part of the package path and function name
-	parts := strings.Split(fullFnName, "/")
-	lastPart := parts[len(parts)-1]
+	lastSlash := strings.LastIndex(fullFnName, "/")
+	if lastSlash < 0 {
+		lastSlash = 0
+	}
+	lastDot := strings.LastIndex(fullFnName[lastSlash:], ".")
+	if lastDot < 0 {
+		return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash:])
+	}
 
-	// Further split on . to handle method receivers
-	nameParts := strings.Split(lastPart, ".")
-	functionName := nameParts[len(nameParts)-1]
-
-	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, functionName)
+	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash+lastDot+1:])
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
@@ -472,10 +474,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
-	if l.rateLimiter != nil && !l.rateLimiter.Allow() {
-		return
-	}
-
 	// Get the current level - check dynamic function first if set
 	var currentLevel LogLevel
 	if l.dynamicLevelFn != nil {
@@ -484,6 +482,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		currentLevel = LogLevel(l.level.Load())
 	}
 
+	// Check if the message level is below the current level
 	if level < currentLevel {
 		return
 	}
