@@ -791,51 +791,53 @@ func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
 	}
 }
 
-// func TestIntegrationHighConcurrencyWithRateLimiting(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+func TestIntegrationHighConcurrencyWithRateLimiting(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	rateLimit := 50 // messages per second
-// 	config := LoggerConfig{
-// 		LogsDir:    tempDir,
-// 		Outputs:    []io.Writer{buf},
-// 		MaxLogRate: rateLimit,
-// 		BufferSize: 1000,
-// 	}
+	rateLimit := 50 // messages per second
+	config := LoggerConfig{
+		LogsDir:    tempDir,
+		Outputs:    []io.Writer{buf},
+		MaxLogRate: rateLimit,
+		BufferSize: 1000,
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	var wg sync.WaitGroup
-// 	messages := 500
-// 	start := time.Now()
+	var wg sync.WaitGroup
+	messages := 500
+	start := time.Now()
 
-// 	for i := 0; i < messages; i++ {
-// 		wg.Add(1)
-// 		go func(num int) {
-// 			defer wg.Done()
-// 			logger.Info(fmt.Sprintf("message %d", num))
-// 		}(i)
-// 	}
+	for i := 0; i < messages; i++ {
+		wg.Add(1)
+		go func(num int) {
+			defer wg.Done()
+			logger.Info(fmt.Sprintf("message %d", num))
+		}(i)
+	}
 
-// 	wg.Wait()
-// 	logger.Flush()
-// 	duration := time.Since(start)
+	wg.Wait()
+	logger.Flush()
+	duration := time.Since(start)
 
-// 	// Count the messages that got through
-// 	output := buf.String()
-// 	count := strings.Count(output, "message")
+	// Count the messages that got through
+	output := buf.String()
+	count := strings.Count(output, "message")
 
-// 	// Verify rate limiting was approximately enforced
-// 	expectedMax := int(float64(rateLimit)*duration.Seconds()) + 20 // Allow some buffer
-// 	if count > expectedMax {
-// 		t.Errorf("Rate limiting failed: got %d messages in %v (max expected ~%d)",
-// 			count, duration, expectedMax)
-// 	}
-// }
+	// Verify rate limiting was approximately enforced
+	// Allow exactly the expected rate plus a small buffer for timing variations
+	expectedMax := int(float64(rateLimit)*duration.Seconds()) + 5
+	if count > expectedMax {
+		t.Errorf("Rate limiting failed: got %d messages in %v (max expected %d)",
+			count, duration, expectedMax)
+	}
+}
+
 // func TestIntegrationDynamicLogLevelFunction(t *testing.T) {
 // 	tempDir := t.TempDir()
 // 	buf := &bytes.Buffer{}
@@ -900,6 +902,7 @@ func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
 // 	}
 // }
 
+// TestIntegrationFatalLogging tests the Fatal logging behavior
 // func TestIntegrationFatalLogging(t *testing.T) {
 // 	tempDir := t.TempDir()
 // 	buf := &bytes.Buffer{}
@@ -913,19 +916,19 @@ func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
 // 	exitCalled := false
 // 	fakeExit := func(int) { exitCalled = true }
 
+// 	// Replace osExit for this test
+// 	oldExit := osExit
+// 	osExit = fakeExit
+// 	defer func() { osExit = oldExit }()
+
 // 	logger, err := NewGourdianLogger(config)
 // 	if err != nil {
 // 		t.Fatalf("Failed to create logger: %v", err)
 // 	}
 // 	defer logger.Close()
 
-// 	// Replace os.Exit for this test
-// 	oldExit := osExit
-// 	osExit = fakeExit
-// 	defer func() { osExit = oldExit }()
-
+// 	// This should call our fake exit function
 // 	logger.Fatal("fatal message")
-// 	logger.Flush()
 
 // 	if !exitCalled {
 // 		t.Error("Fatal log did not trigger exit")
@@ -937,6 +940,98 @@ func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
 // 	}
 // 	if !strings.Contains(output, "FATAL") {
 // 		t.Error("Missing FATAL level in output")
+// 	}
+// }
+
+// // TestIntegrationFatalfLogging tests the Fatalf logging behavior
+// func TestIntegrationFatalfLogging(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir: tempDir,
+// 		Outputs: []io.Writer{buf},
+// 	}
+
+// 	// Use a fake exit function to test fatal behavior
+// 	exitCalled := false
+// 	fakeExit := func(int) { exitCalled = true }
+
+// 	// Replace osExit for this test
+// 	oldExit := osExit
+// 	osExit = fakeExit
+// 	defer func() { osExit = oldExit }()
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	// This should call our fake exit function
+// 	logger.Fatalf("fatal message %d", 123)
+
+// 	if !exitCalled {
+// 		t.Error("Fatalf log did not trigger exit")
+// 	}
+
+// 	output := buf.String()
+// 	if !strings.Contains(output, "fatal message 123") {
+// 		t.Error("Fatalf message not logged")
+// 	}
+// 	if !strings.Contains(output, "FATAL") {
+// 		t.Error("Missing FATAL level in output")
+// 	}
+// }
+
+// // TestIntegrationFatalWithFields tests Fatal logging with fields
+// func TestIntegrationFatalWithFields(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir:   tempDir,
+// 		Outputs:   []io.Writer{buf},
+// 		LogFormat: FormatJSON,
+// 	}
+
+// 	// Use a fake exit function to test fatal behavior
+// 	exitCalled := false
+// 	fakeExit := func(int) { exitCalled = true }
+
+// 	// Replace osExit for this test
+// 	oldExit := osExit
+// 	osExit = fakeExit
+// 	defer func() { osExit = oldExit }()
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	// This should call our fake exit function
+// 	logger.FatalWithFields(map[string]interface{}{
+// 		"user":  "testuser",
+// 		"error": "critical failure",
+// 	}, "fatal with fields")
+
+// 	if !exitCalled {
+// 		t.Error("FatalWithFields did not trigger exit")
+// 	}
+
+// 	output := buf.String()
+// 	if !strings.Contains(output, "fatal with fields") {
+// 		t.Error("Fatal message not logged")
+// 	}
+// 	if !strings.Contains(output, "FATAL") {
+// 		t.Error("Missing FATAL level in output")
+// 	}
+// 	if !strings.Contains(output, `"user":"testuser"`) {
+// 		t.Error("Missing user field in output")
+// 	}
+// 	if !strings.Contains(output, `"error":"critical failure"`) {
+// 		t.Error("Missing error field in output")
 // 	}
 // }
 

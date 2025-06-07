@@ -279,8 +279,10 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov0" 
                 logger.fallbackWriter = os.Stderr
         }</span>
 
+        // In NewGourdianLogger(), change the rate limiter initialization to:
         <span class="cov0" title="0">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
-                logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
+                // Set burst size to 1 to enforce strict rate limiting
+                logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), 1)
         }</span>
 
         <span class="cov0" title="0">logger.level.Store(int32(config.LogLevel))
