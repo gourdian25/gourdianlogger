@@ -1119,6 +1119,83 @@ func TestFlush(t *testing.T) {
 	})
 }
 
+func TestWithFieldsMethods(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Test non-fatal methods first
+	t.Run("NonFatalMethods", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		config := LoggerConfig{
+			LogsDir:   tempDir,
+			Outputs:   []io.Writer{buf},
+			LogFormat: FormatJSON,
+		}
+
+		logger, err := NewGourdianLogger(config)
+		if err != nil {
+			t.Fatalf("Failed to create logger: %v", err)
+		}
+		defer logger.Close()
+
+		fields := map[string]interface{}{
+			"user": "testuser",
+			"id":   123,
+		}
+
+		tests := []struct {
+			name     string
+			method   func()
+			expected []string
+		}{
+			{
+				name: "DebugfWithFields",
+				method: func() {
+					logger.DebugfWithFields(fields, "debug %s", "message")
+				},
+				expected: []string{`"level":"DEBUG"`, `"message":"debug message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "InfofWithFields",
+				method: func() {
+					logger.InfofWithFields(fields, "info %s", "message")
+				},
+				expected: []string{`"level":"INFO"`, `"message":"info message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "WarnfWithFields",
+				method: func() {
+					logger.WarnfWithFields(fields, "warn %s", "message")
+				},
+				expected: []string{`"level":"WARN"`, `"message":"warn message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "ErrorfWithFields",
+				method: func() {
+					logger.ErrorfWithFields(fields, "error %s", "message")
+				},
+				expected: []string{`"level":"ERROR"`, `"message":"error message"`, `"user":"testuser"`, `"id":123`},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				buf.Reset()
+				logger.SetLogLevel(DEBUG)
+				tt.method()
+				logger.Flush()
+
+				output := buf.String()
+				for _, exp := range tt.expected {
+					if !strings.Contains(output, exp) {
+						t.Errorf("Expected log to contain %q, got %q", exp, output)
+					}
+				}
+			})
+		}
+	})
+
+}
+
 // func TestGetCallerInfo(t *testing.T) {
 // 	tests := []struct {
 // 		name         string
@@ -1231,88 +1308,6 @@ func TestFlush(t *testing.T) {
 // 		})
 // 	}
 // }
-
-func TestWithFieldsMethods(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Test non-fatal methods first
-	t.Run("NonFatalMethods", func(t *testing.T) {
-		buf := &bytes.Buffer{}
-		config := LoggerConfig{
-			LogsDir:   tempDir,
-			Outputs:   []io.Writer{buf},
-			LogFormat: FormatJSON,
-		}
-
-		logger, err := NewGourdianLogger(config)
-		if err != nil {
-			t.Fatalf("Failed to create logger: %v", err)
-		}
-		defer logger.Close()
-
-		fields := map[string]interface{}{
-			"user": "testuser",
-			"id":   123,
-		}
-
-		tests := []struct {
-			name     string
-			method   func()
-			expected []string
-		}{
-			{
-				name: "DebugfWithFields",
-				method: func() {
-					logger.DebugfWithFields(fields, "debug %s", "message")
-				},
-				expected: []string{`"level":"DEBUG"`, `"message":"debug message"`, `"user":"testuser"`, `"id":123`},
-			},
-			{
-				name: "InfofWithFields",
-				method: func() {
-					logger.InfofWithFields(fields, "info %s", "message")
-				},
-				expected: []string{`"level":"INFO"`, `"message":"info message"`, `"user":"testuser"`, `"id":123`},
-			},
-			{
-				name: "WarnfWithFields",
-				method: func() {
-					logger.WarnfWithFields(fields, "warn %s", "message")
-				},
-				expected: []string{`"level":"WARN"`, `"message":"warn message"`, `"user":"testuser"`, `"id":123`},
-			},
-			{
-				name: "ErrorfWithFields",
-				method: func() {
-					logger.ErrorfWithFields(fields, "error %s", "message")
-				},
-				expected: []string{`"level":"ERROR"`, `"message":"error message"`, `"user":"testuser"`, `"id":123`},
-			},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				buf.Reset()
-				logger.SetLogLevel(DEBUG)
-				tt.method()
-				logger.Flush()
-
-				output := buf.String()
-				for _, exp := range tt.expected {
-					if !strings.Contains(output, exp) {
-						t.Errorf("Expected log to contain %q, got %q", exp, output)
-					}
-				}
-			})
-		}
-	})
-
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
-}
 
 // func TestCallerInfo(t *testing.T) {
 // 	tempDir := t.TempDir()
