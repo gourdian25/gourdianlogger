@@ -768,6 +768,7 @@ func TestFatalMethods(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=TestFatalMethods")
 	cmd.Env = append(os.Environ(), "BE_FATAL=1")
 	err := cmd.Run()
+	time.Sleep(100 * time.Millisecond)
 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
 		return
 	}
@@ -1233,129 +1234,168 @@ func TestFlush(t *testing.T) {
 
 func TestWithFieldsMethods(t *testing.T) {
 	tempDir := t.TempDir()
-	buf := &bytes.Buffer{}
-
-	config := LoggerConfig{
-		LogsDir:   tempDir,
-		Outputs:   []io.Writer{buf},
-		LogFormat: FormatJSON, // Easier to test field inclusion
-	}
-
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-	defer logger.Close()
-
-	fields := map[string]interface{}{
-		"user": "testuser",
-		"id":   123,
-	}
-
-	tests := []struct {
-		name     string
-		method   func()
-		expected []string
-	}{
-		{
-			name: "DebugfWithFields",
-			method: func() {
-				logger.DebugfWithFields(fields, "debug %s", "message")
-			},
-			expected: []string{`"level":"DEBUG"`, `"message":"debug message"`, `"user":"testuser"`, `"id":123`},
-		},
-		{
-			name: "InfofWithFields",
-			method: func() {
-				logger.InfofWithFields(fields, "info %s", "message")
-			},
-			expected: []string{`"level":"INFO"`, `"message":"info message"`, `"user":"testuser"`, `"id":123`},
-		},
-		{
-			name: "WarnfWithFields",
-			method: func() {
-				logger.WarnfWithFields(fields, "warn %s", "message")
-			},
-			expected: []string{`"level":"WARN"`, `"message":"warn message"`, `"user":"testuser"`, `"id":123`},
-		},
-		{
-			name: "ErrorfWithFields",
-			method: func() {
-				logger.ErrorfWithFields(fields, "error %s", "message")
-			},
-			expected: []string{`"level":"ERROR"`, `"message":"error message"`, `"user":"testuser"`, `"id":123`},
-		},
-	}
 
 	// Test non-fatal methods first
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			buf.Reset()
-			logger.SetLogLevel(DEBUG) // Ensure all levels are logged
-			tt.method()
-			logger.Flush()
+	t.Run("NonFatalMethods", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		config := LoggerConfig{
+			LogsDir:   tempDir,
+			Outputs:   []io.Writer{buf},
+			LogFormat: FormatJSON,
+		}
 
-			output := buf.String()
-			for _, exp := range tt.expected {
-				if !strings.Contains(output, exp) {
-					t.Errorf("Expected log to contain %q, got %q", exp, output)
+		logger, err := NewGourdianLogger(config)
+		if err != nil {
+			t.Fatalf("Failed to create logger: %v", err)
+		}
+		defer logger.Close()
+
+		fields := map[string]interface{}{
+			"user": "testuser",
+			"id":   123,
+		}
+
+		tests := []struct {
+			name     string
+			method   func()
+			expected []string
+		}{
+			{
+				name: "DebugfWithFields",
+				method: func() {
+					logger.DebugfWithFields(fields, "debug %s", "message")
+				},
+				expected: []string{`"level":"DEBUG"`, `"message":"debug message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "InfofWithFields",
+				method: func() {
+					logger.InfofWithFields(fields, "info %s", "message")
+				},
+				expected: []string{`"level":"INFO"`, `"message":"info message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "WarnfWithFields",
+				method: func() {
+					logger.WarnfWithFields(fields, "warn %s", "message")
+				},
+				expected: []string{`"level":"WARN"`, `"message":"warn message"`, `"user":"testuser"`, `"id":123`},
+			},
+			{
+				name: "ErrorfWithFields",
+				method: func() {
+					logger.ErrorfWithFields(fields, "error %s", "message")
+				},
+				expected: []string{`"level":"ERROR"`, `"message":"error message"`, `"user":"testuser"`, `"id":123`},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				buf.Reset()
+				logger.SetLogLevel(DEBUG)
+				tt.method()
+				logger.Flush()
+
+				output := buf.String()
+				for _, exp := range tt.expected {
+					if !strings.Contains(output, exp) {
+						t.Errorf("Expected log to contain %q, got %q", exp, output)
+					}
 				}
-			}
-		})
-	}
+			})
+		}
+	})
 
-	// Test fatal methods separately since they exit
-	// t.Run("FatalWithFields", func(t *testing.T) {
-	// 	// Use a subprocess to test fatal behavior
+	// Test fatal methods separately
+	// testFatalMethod := func(t *testing.T, methodName string, method func(*Logger, map[string]interface{})) {
+	// 	// Create a temp file to capture output
+	// 	tmpfile, err := os.CreateTemp("", "gourdianlogger-test-")
+	// 	if err != nil {
+	// 		t.Fatal(err)
+	// 	}
+	// 	tmpfile.Close() // Close immediately so we can reopen it in the subprocess
+	// 	defer os.Remove(tmpfile.Name())
+
+	// 	t.Logf("Using temp file: %s", tmpfile.Name())
+
+	// 	// Run in subprocess
 	// 	if os.Getenv("TEST_FATAL") == "1" {
-	// 		buf.Reset()
+	// 		config := LoggerConfig{
+	// 			LogsDir:   tempDir,
+	// 			Outputs:   []io.Writer{os.Stdout}, // Also write to stdout for debugging
+	// 			LogFormat: FormatJSON,
+	// 		}
+
+	// 		// Reopen the temp file for writing
+	// 		f, err := os.OpenFile(tmpfile.Name(), os.O_WRONLY|os.O_APPEND, 0644)
+	// 		if err != nil {
+	// 			fmt.Fprintf(os.Stderr, "Failed to open temp file: %v\n", err)
+	// 			os.Exit(1)
+	// 		}
+	// 		defer f.Close()
+
+	// 		// Add the file to outputs
+	// 		config.Outputs = append(config.Outputs, f)
+
+	// 		logger, err := NewGourdianLogger(config)
+	// 		if err != nil {
+	// 			fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
+	// 			os.Exit(1)
+	// 		}
+	// 		defer logger.Close()
+
+	// 		fields := map[string]interface{}{
+	// 			"user": "testuser",
+	// 			"id":   123,
+	// 		}
+
 	// 		logger.SetLogLevel(DEBUG)
-	// 		logger.FatalWithFields(fields, "fatal message")
-	// 		return
+	// 		method(logger, fields)
+
+	// 		// Should never reach here as method should exit
+	// 		os.Exit(0)
 	// 	}
 
-	// 	cmd := exec.Command(os.Args[0], "-test.run=TestWithFieldsMethods/FatalWithFields")
+	// 	cmd := exec.Command(os.Args[0], "-test.run=TestWithFieldsMethods/"+methodName)
 	// 	cmd.Env = append(os.Environ(), "TEST_FATAL=1")
-	// 	err := cmd.Run()
-	// 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-	// 		// Check output after process exits
-	// 		output := buf.String()
-	// 		expected := []string{`"level":"FATAL"`, `"message":"fatal message"`, `"user":"testuser"`, `"id":123`}
-	// 		for _, exp := range expected {
-	// 			if !strings.Contains(output, exp) {
-	// 				t.Errorf("Expected log to contain %q, got %q", exp, output)
-	// 			}
-	// 		}
-	// 		return
+	// 	err = cmd.Run()
+	// 	if e, ok := err.(*exec.ExitError); !ok || e.Success() {
+	// 		t.Fatalf("Process didn't exit with status 1")
 	// 	}
-	// 	t.Fatalf("process ran with err %v, want exit status 1", err)
+
+	// 	t.Logf("Temp file exists: %v", fileExists(tmpfile.Name()))
+	// 	// Read the output file
+	// 	content, err := os.ReadFile(tmpfile.Name())
+	// 	if err != nil {
+	// 		t.Fatalf("Failed to read output file: %v", err)
+	// 	}
+
+	// 	output := string(content)
+	// 	expected := []string{`"level":"FATAL"`, `"user":"testuser"`, `"id":123`}
+	// 	for _, exp := range expected {
+	// 		if !strings.Contains(output, exp) {
+	// 			t.Errorf("Expected log to contain %q, got %q", exp, output)
+	// 		}
+	// 	}
+	// }
+
+	// t.Run("FatalWithFields", func(t *testing.T) {
+	// 	testFatalMethod(t, "FatalWithFields", func(logger *Logger, fields map[string]interface{}) {
+	// 		logger.FatalWithFields(fields, "fatal message")
+	// 	})
 	// })
 
 	// t.Run("FatalfWithFields", func(t *testing.T) {
-	// 	// Use a subprocess to test fatal behavior
-	// 	if os.Getenv("TEST_FATALF") == "1" {
-	// 		buf.Reset()
-	// 		logger.SetLogLevel(DEBUG)
+	// 	testFatalMethod(t, "FatalfWithFields", func(logger *Logger, fields map[string]interface{}) {
 	// 		logger.FatalfWithFields(fields, "fatal %s", "message")
-	// 		return
-	// 	}
-
-	// 	cmd := exec.Command(os.Args[0], "-test.run=TestWithFieldsMethods/FatalfWithFields")
-	// 	cmd.Env = append(os.Environ(), "TEST_FATALF=1")
-	// 	err := cmd.Run()
-	// 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-	// 		// Check output after process exits
-	// 		output := buf.String()
-	// 		expected := []string{`"level":"FATAL"`, `"message":"fatal message"`, `"user":"testuser"`, `"id":123`}
-	// 		for _, exp := range expected {
-	// 			if !strings.Contains(output, exp) {
-	// 				t.Errorf("Expected log to contain %q, got %q", exp, output)
-	// 			}
-	// 		}
-	// 		return
-	// 	}
-	// 	t.Fatalf("process ran with err %v, want exit status 1", err)
+	// 	})
 	// })
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }
 
 // func TestCallerInfo(t *testing.T) {

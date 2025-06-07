@@ -792,8 +792,8 @@ func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}
 
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), fields)
-	// l.Flush()
-	// os.Exit(1)
+	l.Flush()
+	os.Exit(1)
 }
 
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
@@ -814,6 +814,6 @@ func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, 
 
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), fields)
-	// l.Flush()
-	// os.Exit(1)
+	l.Flush()
+	os.Exit(1)
 }
