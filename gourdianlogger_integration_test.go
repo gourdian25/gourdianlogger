@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,11 @@ func TestIntegrationLogRotationWithMultipleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Write enough data to trigger multiple rotations
 	for i := 0; i < 500; i++ {
@@ -77,7 +82,11 @@ func TestIntegrationConcurrentLoggingWithRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	messages := 1000
@@ -135,7 +144,11 @@ func TestIntegrationMultipleOutputsWithFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log messages
 	for i := 0; i < 10; i++ {
@@ -174,7 +187,11 @@ func TestIntegrationDynamicLevelChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Start with INFO level
 	logger.Debug("debug message 1 - should not appear")
@@ -240,13 +257,21 @@ func TestIntegrationMultipleLoggers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger1: %v", err)
 	}
-	defer logger1.Close()
+	defer func() {
+		if err := logger1.Close(); err != nil {
+			t.Errorf("Failed to close logger1: %v", err)
+		}
+	}()
 
 	logger2, err := NewGourdianLogger(config2)
 	if err != nil {
 		t.Fatalf("Failed to create logger2: %v", err)
 	}
-	defer logger2.Close()
+	defer func() {
+		if err := logger2.Close(); err != nil {
+			t.Errorf("Failed to close logger2: %v", err)
+		}
+	}()
 
 	// Log to both loggers
 	logger1.Debug("logger1 debug - should not appear")
@@ -342,7 +367,11 @@ func TestIntegrationLogFormatSwitchingWithFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	fields := map[string]interface{}{
 		"user": "testuser",
@@ -390,7 +419,11 @@ func TestIntegrationFileRotationWithCustomBackupCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Write enough data to trigger multiple rotations
 	for i := 0; i < 1000; i++ {
@@ -438,7 +471,11 @@ func TestIntegrationJSONFormatWithCustomFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log with additional fields
 	fields := map[string]interface{}{
@@ -489,7 +526,11 @@ func TestIntegrationRateLimitingWithConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	messages := 500
@@ -531,7 +572,11 @@ func TestIntegrationCustomTimestampFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	testTime := time.Now()
 	logger.Info("timestamp test")
@@ -558,7 +603,11 @@ func TestIntegrationCallerInformation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.Info("caller info test")
 	logger.Flush()
@@ -582,7 +631,11 @@ func TestIntegrationPauseResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log initial message
 	logger.Info("before pause")
@@ -638,7 +691,11 @@ func TestIntegrationPrettyPrintedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.InfoWithFields(map[string]interface{}{
 		"user": "testuser",
@@ -681,7 +738,11 @@ func TestIntegrationOutputRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log to both outputs
 	logger.Info("message to both")
@@ -721,7 +782,11 @@ func TestIntegrationBufferPoolEfficiency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Get initial pool stats (not exposed, so we'll just test behavior)
 	initialAllocs := testing.AllocsPerRun(10, func() {
@@ -758,7 +823,11 @@ func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log messages at different levels
 	logger.Debug("debug message")
@@ -807,7 +876,11 @@ func TestIntegrationHighConcurrencyWithRateLimiting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	messages := 500
@@ -852,7 +925,11 @@ func TestIntegrationDynamicLogLevelFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Use a counter to make the level changes more predictable
 	callCount := 0
@@ -920,7 +997,11 @@ func TestIntegrationPauseResumeWithConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// First log some messages without pausing to ensure basic functionality
 	for i := 0; i < 100; i++ {
@@ -976,7 +1057,11 @@ func TestIntegrationGetSetLogLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Test initial level (default is DEBUG)
 	if level := logger.GetLogLevel(); level != DEBUG {
@@ -1018,7 +1103,11 @@ func TestIntegrationAddOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log initial message to first buffer
 	logger.Info("message 1")
@@ -1063,7 +1152,11 @@ func TestIntegrationConcurrentRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	messages := 1000
@@ -1124,7 +1217,11 @@ func TestIntegrationDynamicLevelWithRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Set up dynamic level that changes after rotation
 	var rotationCount int
@@ -1205,7 +1302,9 @@ func TestIntegrationCleanupWithCustomBackupCount(t *testing.T) {
 				logger.Info(fmt.Sprintf("message %d for test %s", i, tt.name))
 			}
 			logger.Flush()
-			logger.Close()
+			if err := logger.Close(); err != nil {
+				log.Printf("Error closing logger: %v", err)
+			}
 
 			// Check backup files
 			pattern := filepath.Join(tempDir, "cleanup_test_"+tt.name+"_*.log")
@@ -1236,7 +1335,11 @@ func TestIntegrationAddOutputConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	outputs := make([]*bytes.Buffer, 10)
@@ -1301,7 +1404,9 @@ func TestIntegrationRotateWithClosedFile(t *testing.T) {
 	}
 
 	// Clean up
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		log.Printf("Error closing logger: %v", err)
+	}
 }
 
 func TestIntegrationRotateWithFailedRename(t *testing.T) {
@@ -1319,7 +1424,11 @@ func TestIntegrationRotateWithFailedRename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			t.Errorf("Failed to close logger: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tempDir, "rotate_fail.log")
 
@@ -1355,7 +1464,11 @@ func TestIntegrationRotateWithFailedRename(t *testing.T) {
 	if err := os.Chmod(tempDir, 0555); err != nil {
 		t.Fatalf("Failed to make directory read-only: %v", err)
 	}
-	defer os.Chmod(tempDir, 0755) // Clean up
+	defer func() {
+		if err := os.Chmod(tempDir, 0755); err != nil {
+			t.Errorf("Failed to restore directory permissions: %v", err)
+		}
+	}()
 
 	// Manually trigger rotation
 	logger.fileMu.Lock()

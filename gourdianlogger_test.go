@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -379,7 +380,9 @@ func TestAsyncLogging(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Close to flush all messages
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		log.Printf("Error closing logger: %v", err)
+	}
 
 	// Verify all messages were written
 	output := buf.String()
@@ -410,7 +413,11 @@ func TestLogRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Write enough data to trigger rotation
 	for i := 0; i < 50; i++ {
@@ -445,7 +452,11 @@ func TestAddRemoveOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Test initial output
 	logger.Info("message 1")
@@ -570,7 +581,11 @@ func TestPauseResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Pause logging
 	logger.Pause()
@@ -617,7 +632,11 @@ func TestCustomFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.Info("test message")
 	logger.Flush()
@@ -658,7 +677,9 @@ func TestBufferPool(t *testing.T) {
 		logger.Info(fmt.Sprintf("message %d", i))
 	}
 
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		log.Printf("Error closing logger: %v", err)
+	}
 
 	// Verify pool is being used by checking capacity consistency
 	newBuf := logger.bufferPool.Get().(*bytes.Buffer)
@@ -998,7 +1019,9 @@ func TestCleanupOldBackups(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create test file: %v", err)
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			t.Fatalf("Failed to close test file: %v", err)
+		}
 	}
 
 	logger := &Logger{

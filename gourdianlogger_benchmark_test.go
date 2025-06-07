@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -32,7 +33,11 @@ func BenchmarkDirectLogging(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -60,7 +65,11 @@ func BenchmarkBufferedLogging(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -88,7 +97,11 @@ func BenchmarkConcurrentLogging(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	workers := 16
@@ -128,7 +141,11 @@ func BenchmarkJSONFormat(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -156,7 +173,11 @@ func BenchmarkWithFields(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	fields := map[string]interface{}{
 		"user_id":    12345,
@@ -192,7 +213,11 @@ func BenchmarkRateLimited(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -222,7 +247,11 @@ func BenchmarkFileRotation(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -251,7 +280,11 @@ func BenchmarkCallerInfo(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -280,7 +313,11 @@ func BenchmarkPlainTextFormat(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -312,7 +349,11 @@ func BenchmarkMultiOutput(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -340,7 +381,11 @@ func BenchmarkLogLevelFilter(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -371,7 +416,11 @@ func BenchmarkDynamicLogLevel(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Set up dynamic level function
 	counter := 0
@@ -405,7 +454,11 @@ func BenchmarkPlainTextFormatSmallMessage(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	message := "This is a small log message"
 
@@ -429,7 +482,11 @@ func BenchmarkJSONFormatSmallMessage(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	message := "This is a small JSON log message"
 
@@ -454,7 +511,11 @@ func BenchmarkLoggingWithVaryingMessageSizes(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	sizes := []struct {
 		name    string
@@ -490,7 +551,11 @@ func BenchmarkLoggingWithManyFields(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	fields := make(map[string]interface{})
 	for i := 0; i < 50; i++ {
@@ -518,7 +583,11 @@ func BenchmarkLoggingWithComplexFields(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	type User struct {
 		ID       int
@@ -562,7 +631,9 @@ func BenchmarkLoggerCreation(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		logger.Close()
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
 	}
 }
 
@@ -584,7 +655,11 @@ func BenchmarkLoggerWithCustomErrorHandler(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -607,7 +682,11 @@ func BenchmarkDynamicLevelChange(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	counter := 0
 	logger.SetDynamicLevelFunc(func() LogLevel {
@@ -637,7 +716,11 @@ func BenchmarkLoggingWithRateLimiting(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -660,7 +743,11 @@ func BenchmarkLoggingWithPauseResume(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -687,7 +774,11 @@ func BenchmarkAddRemoveOutput(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	output := &bytes.Buffer{}
 
@@ -713,7 +804,11 @@ func BenchmarkMixedOperations(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.RunParallel(func(pb *testing.PB) {
 		count := 0
@@ -759,7 +854,11 @@ func BenchmarkHighContention(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	workers := 100

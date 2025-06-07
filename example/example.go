@@ -1,5 +1,4 @@
 // File: example/example.go
-
 package main
 
 import (
@@ -29,7 +28,11 @@ func useDefaultLogger() {
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.Info("Service initializing with default logger")
 	logger.Debugf("Config loaded: %+v", "example config")
@@ -68,7 +71,11 @@ func useCustomConfiguredLogger() {
 	if err != nil {
 		log.Fatalf("Failed to initialize custom logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.Info("Custom configured logger initialized")
 	logger.Debug("This debug message won't appear because log level is INFO")
@@ -87,7 +94,11 @@ func useAdvancedLogger() {
 	if err != nil {
 		log.Fatalf("Failed to create TCP listener: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			log.Printf("Error closing listener: %v", err)
+		}
+	}()
 
 	// Start a simple TCP server to receive logs
 	go func() {
@@ -95,7 +106,11 @@ func useAdvancedLogger() {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				log.Printf("Error closing connection: %v", err)
+			}
+		}()
 
 		// Just read and print what we receive
 		buf := make([]byte, 1024)
@@ -118,7 +133,6 @@ func useAdvancedLogger() {
 		Outputs: []io.Writer{
 			&buf,      // in-memory buffer
 			os.Stderr, // stderr
-			// Add TCP connection as output
 		},
 	}
 
@@ -126,14 +140,22 @@ func useAdvancedLogger() {
 	if err != nil {
 		log.Fatalf("Failed to initialize advanced logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Add TCP connection output after logger creation
 	tcpConn, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
 		log.Fatalf("Failed to connect to TCP listener: %v", err)
 	}
-	defer tcpConn.Close()
+	defer func() {
+		if err := tcpConn.Close(); err != nil {
+			log.Printf("Error closing TCP connection: %v", err)
+		}
+	}()
 
 	logger.AddOutput(tcpConn)
 
@@ -156,21 +178,6 @@ func useAdvancedLogger() {
 	logger.Info("This message won't appear while paused")
 	logger.Resume()
 	logger.Info("This message appears after resume")
-
-	// // Test rate limiting
-	// logger.config.MaxLogRate = 2 // 2 logs per second
-	// logger.rateLimiter = rate.NewLimiter(rate.Limit(logger.config.MaxLogRate), logger.config.MaxLogRate)
-
-	// for i := 0; i < 5; i++ {
-	// 	logger.Infof("Rate limited message %d", i)
-	// }
-
-	// // Test file rotation by forcing a rotation
-	// logger.fileMu.Lock()
-	// if err := logger.rotateLogFiles(); err != nil {
-	// 	logger.Error("Failed to rotate log files: ", err)
-	// }
-	// logger.fileMu.Unlock()
 
 	// Verify buffer output
 	println("Buffer contents:", buf.String())
