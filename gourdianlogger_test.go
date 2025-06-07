@@ -17,11 +17,18 @@ import (
 	"time"
 )
 
+// // failingWriter is an io.Writer that always fails
+// type failingWriter struct{}
+
+// func (w *failingWriter) Write(p []byte) (n int, err error) {
+// 	return 0, errors.New("simulated write error")
+// }
+
 // failingWriter is an io.Writer that always fails
 type failingWriter struct{}
 
-func (w *failingWriter) Write(p []byte) (n int, err error) {
-	return 0, errors.New("simulated write error")
+func (f *failingWriter) Write(p []byte) (n int, err error) {
+	return 0, io.ErrClosedPipe
 }
 
 // syncBuffer wraps bytes.Buffer with thread-safe access
