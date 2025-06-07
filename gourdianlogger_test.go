@@ -986,6 +986,338 @@ func TestRateLimiting(t *testing.T) {
 	}
 }
 
+func TestCleanupOldBackups(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create test backup files
+	baseName := filepath.Join(tempDir, "testlog")
+	for i := 0; i < 5; i++ {
+		fname := fmt.Sprintf("%s_%s.log", baseName, time.Now().Add(-time.Duration(i)*time.Hour).Format("20060102_150405"))
+		f, err := os.Create(fname)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+		f.Close()
+	}
+
+	logger := &Logger{
+		baseFilename: baseName + ".log",
+		backupCount:  2,
+	}
+
+	// Run cleanup
+	logger.cleanupOldBackups()
+
+	// Check remaining files
+	files, err := filepath.Glob(baseName + "_*.log")
+	if err != nil {
+		t.Fatalf("Failed to list backup files: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Errorf("Expected 2 backup files after cleanup, got %d", len(files))
+	}
+}
+
+func TestSetGetLogLevel(t *testing.T) {
+	logger := &Logger{}
+
+	tests := []struct {
+		name     string
+		setLevel LogLevel
+	}{
+		{"Debug", DEBUG},
+		{"Info", INFO},
+		{"Warn", WARN},
+		{"Error", ERROR},
+		{"Fatal", FATAL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger.SetLogLevel(tt.setLevel)
+			got := logger.GetLogLevel()
+			if got != tt.setLevel {
+				t.Errorf("GetLogLevel() = %v, want %v", got, tt.setLevel)
+			}
+		})
+	}
+}
+
+func TestNewDefaultGourdianLogger(t *testing.T) {
+	logger, err := NewDefaultGourdianLogger()
+	if err != nil {
+		t.Fatalf("NewDefaultGourdianLogger() failed: %v", err)
+	}
+	defer logger.Close()
+
+	// Verify default values
+	if logger.backupCount != defaultBackupCount {
+		t.Errorf("Expected backupCount %d, got %d", defaultBackupCount, logger.backupCount)
+	}
+	if logger.maxBytes != defaultMaxBytes {
+		t.Errorf("Expected maxBytes %d, got %d", defaultMaxBytes, logger.maxBytes)
+	}
+	if LogLevel(logger.level.Load()) != defaultLogLevel {
+		t.Errorf("Expected logLevel %v, got %v", defaultLogLevel, LogLevel(logger.level.Load()))
+	}
+	if logger.timestampFormat != defaultTimestampFormat {
+		t.Errorf("Expected timestampFormat %q, got %q", defaultTimestampFormat, logger.timestampFormat)
+	}
+	if logger.logsDir != defaultLogsDir {
+		t.Errorf("Expected logsDir %q, got %q", defaultLogsDir, logger.logsDir)
+	}
+	if logger.enableCaller != defaultEnableCaller {
+		t.Errorf("Expected enableCaller %v, got %v", defaultEnableCaller, logger.enableCaller)
+	}
+	if logger.asyncWorkers != defaultAsyncWorkers {
+		t.Errorf("Expected asyncWorkers %d, got %d", defaultAsyncWorkers, logger.asyncWorkers)
+	}
+	if logger.format != defaultLogFormat {
+		t.Errorf("Expected format %v, got %v", defaultLogFormat, logger.format)
+	}
+}
+
+// func TestGetCallerInfo(t *testing.T) {
+// 	tests := []struct {
+// 		name         string
+// 		enableCaller bool
+// 		expected     string
+// 	}{
+// 		{
+// 			name:         "CallerDisabled",
+// 			enableCaller: false,
+// 			expected:     "",
+// 		},
+// 		{
+// 			name:         "CallerEnabled",
+// 			enableCaller: true,
+// 			expected:     "gourdianlogger_test.go:", // We expect this file name
+// 		},
+// 	}
+
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			logger := &Logger{
+// 				enableCaller: tt.enableCaller,
+// 			}
+
+// 			callerInfo := logger.getCallerInfo()
+
+// 			if tt.enableCaller {
+// 				if callerInfo == "" {
+// 					t.Error("Expected caller info, got empty string")
+// 				}
+// 				if !strings.Contains(callerInfo, tt.expected) {
+// 					t.Errorf("Expected caller info to contain %q, got %q", tt.expected, callerInfo)
+// 				}
+// 			} else {
+// 				if callerInfo != "" {
+// 					t.Errorf("Expected empty caller info when disabled, got %q", callerInfo)
+// 				}
+// 			}
+// 		})
+// 	}
+// }
+
+// func TestFlush(t *testing.T) {
+// 	t.Run("AsyncQueueEmpty", func(t *testing.T) {
+// 		logger := &Logger{}
+// 		logger.Flush() // Should not panic
+// 	})
+
+// 	t.Run("AsyncQueueNotEmpty", func(t *testing.T) {
+// 		tempDir := t.TempDir()
+// 		buf := &bytes.Buffer{}
+
+// 		config := LoggerConfig{
+// 			LogsDir:      tempDir,
+// 			Outputs:      []io.Writer{buf},
+// 			BufferSize:   10,
+// 			AsyncWorkers: 1,
+// 		}
+
+// 		logger, err := NewGourdianLogger(config)
+// 		if err != nil {
+// 			t.Fatalf("Failed to create logger: %v", err)
+// 		}
+// 		defer logger.Close()
+
+// 		// Fill the async queue
+// 		for i := 0; i < 5; i++ {
+// 			logger.Info(fmt.Sprintf("message %d", i))
+// 		}
+
+// 		// Flush should wait for all messages to be processed
+// 		logger.Flush()
+
+// 		output := buf.String()
+// 		for i := 0; i < 5; i++ {
+// 			if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
+// 				t.Errorf("Missing message %d in output", i)
+// 			}
+// 		}
+// 	})
+// }
+
+// func TestFormatMethods(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir: tempDir,
+// 		Outputs: []io.Writer{buf},
+// 	}
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	tests := []struct {
+// 		name     string
+// 		method   func()
+// 		expected string
+// 	}{
+// 		{
+// 			name: "Debugf",
+// 			method: func() {
+// 				logger.Debugf("debug %s", "message")
+// 			},
+// 			expected: "[DEBUG] debug message",
+// 		},
+// 		{
+// 			name: "Infof",
+// 			method: func() {
+// 				logger.Infof("info %s", "message")
+// 			},
+// 			expected: "[INFO] info message",
+// 		},
+// 		{
+// 			name: "Warnf",
+// 			method: func() {
+// 				logger.Warnf("warn %s", "message")
+// 			},
+// 			expected: "[WARN] warn message",
+// 		},
+// 		{
+// 			name: "Errorf",
+// 			method: func() {
+// 				logger.Errorf("error %s", "message")
+// 			},
+// 			expected: "[ERROR] error message",
+// 		},
+// 		{
+// 			name: "Fatalf",
+// 			method: func() {
+// 				logger.Fatalf("fatal %s", "message")
+// 			},
+// 			expected: "[FATAL] fatal message",
+// 		},
+// 	}
+
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			buf.Reset()
+// 			logger.SetLogLevel(DEBUG) // Ensure all levels are logged
+// 			tt.method()
+// 			logger.Flush()
+
+// 			if !strings.Contains(buf.String(), tt.expected) {
+// 				t.Errorf("Expected log to contain %q, got %q", tt.expected, buf.String())
+// 			}
+// 		})
+// 	}
+// }
+
+// func TestWithFieldsMethods(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir:   tempDir,
+// 		Outputs:   []io.Writer{buf},
+// 		LogFormat: FormatJSON, // Easier to test field inclusion
+// 	}
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	fields := map[string]interface{}{
+// 		"user": "testuser",
+// 		"id":   123,
+// 	}
+
+// 	tests := []struct {
+// 		name     string
+// 		method   func()
+// 		expected []string
+// 	}{
+// 		{
+// 			name: "FatalWithFields",
+// 			method: func() {
+// 				logger.FatalWithFields(fields, "fatal message")
+// 			},
+// 			expected: []string{`"level":"FATAL"`, `"message":"fatal message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 		{
+// 			name: "DebugfWithFields",
+// 			method: func() {
+// 				logger.DebugfWithFields(fields, "debug %s", "message")
+// 			},
+// 			expected: []string{`"level":"DEBUG"`, `"message":"debug message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 		{
+// 			name: "InfofWithFields",
+// 			method: func() {
+// 				logger.InfofWithFields(fields, "info %s", "message")
+// 			},
+// 			expected: []string{`"level":"INFO"`, `"message":"info message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 		{
+// 			name: "WarnfWithFields",
+// 			method: func() {
+// 				logger.WarnfWithFields(fields, "warn %s", "message")
+// 			},
+// 			expected: []string{`"level":"WARN"`, `"message":"warn message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 		{
+// 			name: "ErrorfWithFields",
+// 			method: func() {
+// 				logger.ErrorfWithFields(fields, "error %s", "message")
+// 			},
+// 			expected: []string{`"level":"ERROR"`, `"message":"error message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 		{
+// 			name: "FatalfWithFields",
+// 			method: func() {
+// 				logger.FatalfWithFields(fields, "fatal %s", "message")
+// 			},
+// 			expected: []string{`"level":"FATAL"`, `"message":"fatal message"`, `"user":"testuser"`, `"id":123`},
+// 		},
+// 	}
+
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			buf.Reset()
+// 			logger.SetLogLevel(DEBUG) // Ensure all levels are logged
+// 			tt.method()
+// 			logger.Flush()
+
+// 			output := buf.String()
+// 			for _, exp := range tt.expected {
+// 				if !strings.Contains(output, exp) {
+// 					t.Errorf("Expected log to contain %q, got %q", exp, output)
+// 				}
+// 			}
+// 		})
+// 	}
+// }
+
 // func TestCallerInfo(t *testing.T) {
 // 	tempDir := t.TempDir()
 // 	buf := &bytes.Buffer{}

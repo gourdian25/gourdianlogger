@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (78.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (81.4%)</option>
 				
 				</select>
 			</div>
@@ -301,7 +301,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         <span class="cov8" title="1">return logger, nil</span>
 }
 
-func NewDefaultGourdianLogger() (*Logger, error) <span class="cov0" title="0">{
+func NewDefaultGourdianLogger() (*Logger, error) <span class="cov8" title="1">{
         config := LoggerConfig{
                 Filename:        defaultFileName,
                 MaxBytes:        defaultMaxBytes,
@@ -677,13 +677,13 @@ func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
                 return
         }</span>
 
-        <span class="cov0" title="0">sort.Slice(files, func(i, j int) bool </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">sort.Slice(files, func(i, j int) bool </span><span class="cov8" title="1">{
                 info1, _ := os.Stat(files[i])
                 info2, _ := os.Stat(files[j])
                 return info1.ModTime().Before(info2.ModTime())
         }</span>)
 
-        <span class="cov0" title="0">for _, f := range files[:len(files)-l.backupCount] </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">for _, f := range files[:len(files)-l.backupCount] </span><span class="cov8" title="1">{
                 _ = os.Remove(f)
         }</span>
 }
@@ -696,11 +696,11 @@ func (l *Logger) Flush() <span class="cov8" title="1">{
         }
 }
 
-func (l *Logger) SetLogLevel(level LogLevel) <span class="cov0" title="0">{
+func (l *Logger) SetLogLevel(level LogLevel) <span class="cov8" title="1">{
         l.level.Store(int32(level))
 }</span>
 
-func (l *Logger) GetLogLevel() LogLevel <span class="cov0" title="0">{
+func (l *Logger) GetLogLevel() LogLevel <span class="cov8" title="1">{
         return LogLevel(l.level.Load())
 }</span>
 
