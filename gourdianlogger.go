@@ -36,37 +36,43 @@ const (
 
 var (
 	defaultBackupCount     int       = 5
-	defaultMaxBytes        int64     = 10 * 1024 * 1024 // 10MB
+	defaultBufferSize      int       = 0
+	defaultAsyncWorkers    int       = 1
+	defaultMaxLogRate      int       = 0
+	defaultEnableCaller    bool      = true
+	defaultEnableFallback  bool      = true
 	defaultLogsDir         string    = "logs"
-	defaultTimestampFormat string    = "2006-01-02 15:04:05.000000"
+	defaultLogLevel        LogLevel  = DEBUG
 	defaultLogFormat       LogFormat = FormatPlain
+	defaultFileName        string    = "gourdianlogs"
+	defaultMaxBytes        int64     = 10 * 1024 * 1024
+	defaultTimestampFormat string    = "2006-01-02 15:04:05.000000"
 )
 
 type LoggerConfig struct {
-	Filename        string                 `json:"filename"`         // Base filename for logs
-	MaxBytes        int64                  `json:"max_bytes"`        // Max file size before rotation
 	BackupCount     int                    `json:"backup_count"`     // Number of backups to keep
-	LogLevel        LogLevel               `json:"log_level"`        // Log level as string (for config)
-	TimestampFormat string                 `json:"timestamp_format"` // Custom timestamp format
-	LogsDir         string                 `json:"logs_dir"`         // Directory for log files
-	EnableCaller    bool                   `json:"enable_caller"`    // Include caller info
 	BufferSize      int                    `json:"buffer_size"`      // Buffer size for async logging
 	AsyncWorkers    int                    `json:"async_workers"`    // Number of async workers
-	FormatStr       string                 `json:"format"`           // Format as string (for config)
-	EnableFallback  bool                   `json:"enable_fallback"`  // Whether to use fallback logging
 	MaxLogRate      int                    `json:"max_log_rate"`     // Max logs per second (0 for unlimited)
+	EnableCaller    bool                   `json:"enable_caller"`    // Include caller info
+	EnableFallback  bool                   `json:"enable_fallback"`  // Whether to use fallback logging
+	PrettyPrint     bool                   `json:"pretty_print"`     // For human-readable JSON
+	MaxBytes        int64                  `json:"max_bytes"`        // Max file size before rotation
+	Filename        string                 `json:"filename"`         // Base filename for logs
+	TimestampFormat string                 `json:"timestamp_format"` // Custom timestamp format
+	LogsDir         string                 `json:"logs_dir"`         // Directory for log files
+	FormatStr       string                 `json:"format"`           // Format as string (for config)
+	LogLevel        LogLevel               `json:"log_level"`        // Log level as string (for config)
+	CustomFields    map[string]interface{} `json:"custom_fields"`    // Custom fields to include
 	Outputs         []io.Writer            `json:"-"`                // Additional outputs
 	LogFormat       LogFormat              `json:"-"`                // Log message format (internal use)
 	ErrorHandler    func(error)            `json:"-"`                // Custom error handler
-	PrettyPrint     bool                   `json:"pretty_print"`     // For human-readable JSON
-	CustomFields    map[string]interface{} `json:"custom_fields"`    // Custom fields to include
 }
 
 type Logger struct {
-	fileMu       sync.Mutex   // Protects file operations
-	bufferPoolMu sync.Mutex   // Protects buffer pool access
-	outputsMu    sync.RWMutex // Protects outputs slice
-
+	fileMu          sync.Mutex
+	bufferPoolMu    sync.Mutex
+	outputsMu       sync.RWMutex
 	level           atomic.Int32
 	baseFilename    string
 	maxBytes        int64
@@ -91,7 +97,7 @@ type Logger struct {
 	rateLimiter     *rate.Limiter
 	config          LoggerConfig
 	dynamicLevelFn  func() LogLevel
-	paused          atomic.Bool // New field to track pause state
+	paused          atomic.Bool
 }
 
 type logEntry struct {
@@ -124,18 +130,18 @@ func ParseLogLevel(level string) (LogLevel, error) {
 
 func DefaultConfig() LoggerConfig {
 	return LoggerConfig{
-		Filename:        "app",
+		Filename:        defaultFileName,
 		MaxBytes:        defaultMaxBytes,
 		BackupCount:     defaultBackupCount,
-		LogLevel:        DEBUG,
+		LogLevel:        defaultLogLevel,
 		TimestampFormat: defaultTimestampFormat,
 		LogsDir:         defaultLogsDir,
-		EnableCaller:    true,
-		BufferSize:      0, // Sync by default
-		AsyncWorkers:    1,
-		LogFormat:       FormatPlain,
-		EnableFallback:  true,
-		MaxLogRate:      0, // Unlimited by default
+		EnableCaller:    defaultEnableCaller,
+		BufferSize:      defaultBufferSize, // Sync by default
+		AsyncWorkers:    defaultAsyncWorkers,
+		LogFormat:       defaultLogFormat,
+		EnableFallback:  defaultEnableFallback,
+		MaxLogRate:      defaultMaxLogRate, // Unlimited by default
 	}
 }
 
@@ -239,7 +245,20 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 }
 
 func NewGourdianLoggerWithDefault() (*Logger, error) {
-	config := DefaultConfig()
+	config := LoggerConfig{
+		Filename:        defaultFileName,
+		MaxBytes:        defaultMaxBytes,
+		BackupCount:     defaultBackupCount,
+		LogLevel:        defaultLogLevel,
+		TimestampFormat: defaultTimestampFormat,
+		LogsDir:         defaultLogsDir,
+		EnableCaller:    defaultEnableCaller,
+		BufferSize:      defaultBufferSize,
+		AsyncWorkers:    defaultAsyncWorkers,
+		LogFormat:       defaultLogFormat,
+		EnableFallback:  defaultEnableFallback,
+		MaxLogRate:      defaultMaxLogRate,
+	}
 	return NewGourdianLogger(config)
 }
 
