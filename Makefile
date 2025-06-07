@@ -1,4 +1,4 @@
-VERSION := v0.0.2
+VERSION := v0.0.3
 
 # Create test coverage directory
 COVERAGE_DIR := test_coverage
