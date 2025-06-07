@@ -449,11 +449,6 @@ func (l *Logger) getCallerInfo() string {
 		return ""
 	}
 
-	// Skip 3 frames to get the actual caller:
-	// 0 - runtime.Caller
-	// 1 - this function
-	// 2 - formatMessage
-	// 3 - the actual logging function (Debug, Info, etc.)
 	pc, file, line, ok := runtime.Caller(3)
 	if !ok {
 		return ""
@@ -510,7 +505,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		select {
 		case l.asyncQueue <- buf:
 		default:
-			// Fallback to sync write if queue is full
 			l.writeBuffer(buf)
 		}
 	} else {
@@ -662,19 +656,16 @@ func (l *Logger) Close() error {
 		return nil
 	}
 
-	// Close channels first to stop workers
 	close(l.rotateCloseChan)
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
 
-	// Wait for all workers to finish
 	l.wg.Wait()
 
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 
-	// Close file last
 	if l.file != nil {
 		return l.file.Close()
 	}
@@ -697,12 +688,6 @@ func (l *Logger) IsPaused() bool {
 	return l.paused.Load()
 }
 
-func (l *Logger) WithPause(fn func()) {
-	l.Pause()
-	defer l.Resume()
-	fn()
-}
-
 func (l *Logger) Debug(v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), nil)
 }
@@ -721,8 +706,8 @@ func (l *Logger) Error(v ...interface{}) {
 
 func (l *Logger) Fatal(v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), nil)
-	l.Flush()
-	os.Exit(1)
+	// l.Flush()
+	// os.Exit(1)
 }
 
 func (l *Logger) Debugf(format string, v ...interface{}) {
@@ -743,8 +728,8 @@ func (l *Logger) Errorf(format string, v ...interface{}) {
 
 func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), nil)
-	l.Flush()
-	os.Exit(1)
+	// l.Flush()
+	// os.Exit(1)
 }
 
 func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) {
@@ -765,8 +750,8 @@ func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}
 
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), fields)
-	l.Flush()
-	os.Exit(1)
+	// l.Flush()
+	// os.Exit(1)
 }
 
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
@@ -787,6 +772,6 @@ func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, 
 
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), fields)
-	l.Flush()
-	os.Exit(1)
+	// l.Flush()
+	// os.Exit(1)
 }
