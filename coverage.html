@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (82.4%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (86.4%)</option>
 				
 				</select>
 			</div>
@@ -406,9 +406,9 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1
         defer l.fileMu.Unlock()
 
         for _, buf := range buffers </span><span class="cov8" title="1">{
-                if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+                if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov8" title="1">{
                         l.handleError(fmt.Errorf("log write error: %w", err))
-                        if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+                        if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                                 fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                         }</span>
                 }
@@ -420,9 +420,9 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
         l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
-        if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+        if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov8" title="1">{
                 l.handleError(fmt.Errorf("log write error: %w", err))
-                if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+                if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                         fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                 }</span>
         }
@@ -432,7 +432,7 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
 func (l *Logger) handleError(err error) <span class="cov8" title="1">{
         if l.errorHandler != nil </span><span class="cov8" title="1">{
                 l.errorHandler(err)
-        }</span> else<span class="cov0" title="0"> if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+        }</span> else<span class="cov8" title="1"> if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                 fmt.Fprintf(l.fallbackWriter, "LOGGER ERROR: %v\n", err)
         }</span>
 }
@@ -823,23 +823,23 @@ func (l *Logger) Fatal(v ...interface{}) <span class="cov8" title="1">{
         // os.Exit(1)
 }</span>
 
-func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Infof(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Infof(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(FATAL, fmt.Sprintf(format, v...), nil)
         // l.Flush()
         // os.Exit(1)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,9 @@ import (
 
 // failingWriter is an io.Writer that always fails
 type failingWriter struct{}
+
+// runtimeCaller is a variable for testing runtime.Caller behavior
+var runtimeCaller = runtime.Caller
 
 func (w *failingWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("simulated write error")
@@ -1195,6 +1199,333 @@ func TestWithFieldsMethods(t *testing.T) {
 	})
 
 }
+
+// TestWriteBatch tests the writeBatch function
+func TestWriteBatch(t *testing.T) {
+	t.Run("SuccessfulWrite", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := &Logger{
+			multiWriter: buf,
+			bufferPool: sync.Pool{
+				New: func() interface{} {
+					return bytes.NewBuffer(make([]byte, 0, 256))
+				},
+			},
+		}
+
+		buffers := []*bytes.Buffer{
+			bytes.NewBufferString("message 1\n"),
+			bytes.NewBufferString("message 2\n"),
+		}
+
+		logger.writeBatch(buffers)
+
+		output := buf.String()
+		if !strings.Contains(output, "message 1") || !strings.Contains(output, "message 2") {
+			t.Error("Expected both messages to be written")
+		}
+	})
+
+	t.Run("WriteErrorWithFallback", func(t *testing.T) {
+		errorBuf := &bytes.Buffer{}
+		fallbackBuf := &bytes.Buffer{}
+		logger := &Logger{
+			multiWriter:    &failingWriter{},
+			fallbackWriter: fallbackBuf,
+			errorHandler: func(err error) {
+				fmt.Fprintf(errorBuf, "ERROR: %v", err)
+			},
+			bufferPool: sync.Pool{
+				New: func() interface{} {
+					return bytes.NewBuffer(make([]byte, 0, 256))
+				},
+			},
+		}
+
+		buffers := []*bytes.Buffer{
+			bytes.NewBufferString("error message\n"),
+		}
+
+		logger.writeBatch(buffers)
+
+		if errorBuf.String() == "" {
+			t.Error("Expected error handler to be called")
+		}
+		if !strings.Contains(fallbackBuf.String(), "FALLBACK LOG: error message") {
+			t.Error("Expected fallback writer to be used")
+		}
+	})
+
+	t.Run("BuffersReturnedToPool", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := &Logger{
+			multiWriter: buf,
+			bufferPool: sync.Pool{
+				New: func() interface{} {
+					return bytes.NewBuffer(make([]byte, 0, 256))
+				},
+			},
+		}
+
+		// Get initial buffer from pool to check capacity
+		initialBuf := logger.bufferPool.Get().(*bytes.Buffer)
+		initialCap := initialBuf.Cap()
+		logger.bufferPool.Put(initialBuf)
+
+		buffers := []*bytes.Buffer{
+			bytes.NewBufferString("message 1\n"),
+			bytes.NewBufferString("message 2\n"),
+		}
+
+		logger.writeBatch(buffers)
+
+		// Get buffer after write to verify it was returned to pool
+		newBuf := logger.bufferPool.Get().(*bytes.Buffer)
+		newCap := newBuf.Cap()
+		logger.bufferPool.Put(newBuf)
+
+		if initialCap != newCap {
+			t.Errorf("Buffer pool capacity changed unexpectedly, was %d, now %d", initialCap, newCap)
+		}
+	})
+}
+
+// TestWriteBuffer tests the writeBuffer function
+func TestWriteBuffer(t *testing.T) {
+	t.Run("SuccessfulWrite", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := &Logger{
+			multiWriter: buf,
+			bufferPool: sync.Pool{
+				New: func() interface{} {
+					return bytes.NewBuffer(make([]byte, 0, 256))
+				},
+			},
+		}
+
+		msgBuf := bytes.NewBufferString("test message\n")
+		logger.writeBuffer(msgBuf)
+
+		if !strings.Contains(buf.String(), "test message") {
+			t.Error("Expected message to be written")
+		}
+	})
+
+	t.Run("WriteErrorWithFallback", func(t *testing.T) {
+		errorBuf := &bytes.Buffer{}
+		fallbackBuf := &bytes.Buffer{}
+		logger := &Logger{
+			multiWriter:    &failingWriter{},
+			fallbackWriter: fallbackBuf,
+			errorHandler: func(err error) {
+				fmt.Fprintf(errorBuf, "ERROR: %v", err)
+			},
+			bufferPool: sync.Pool{
+				New: func() interface{} {
+					return bytes.NewBuffer(make([]byte, 0, 256))
+				},
+			},
+		}
+
+		msgBuf := bytes.NewBufferString("error message\n")
+		logger.writeBuffer(msgBuf)
+
+		if errorBuf.String() == "" {
+			t.Error("Expected error handler to be called")
+		}
+		if !strings.Contains(fallbackBuf.String(), "FALLBACK LOG: error message") {
+			t.Error("Expected fallback writer to be used")
+		}
+	})
+}
+
+// TestHandleError tests the handleError function
+func TestHandleError(t *testing.T) {
+	t.Run("WithErrorHandler", func(t *testing.T) {
+		errorBuf := &bytes.Buffer{}
+		logger := &Logger{
+			errorHandler: func(err error) {
+				fmt.Fprintf(errorBuf, "HANDLED: %v", err)
+			},
+		}
+
+		testErr := errors.New("test error")
+		logger.handleError(testErr)
+
+		if !strings.Contains(errorBuf.String(), "HANDLED: test error") {
+			t.Error("Expected error handler to be called")
+		}
+	})
+
+	t.Run("WithFallbackWriter", func(t *testing.T) {
+		fallbackBuf := &bytes.Buffer{}
+		logger := &Logger{
+			fallbackWriter: fallbackBuf,
+		}
+
+		testErr := errors.New("test error")
+		logger.handleError(testErr)
+
+		if !strings.Contains(fallbackBuf.String(), "LOGGER ERROR: test error") {
+			t.Error("Expected fallback writer to be used")
+		}
+	})
+
+	t.Run("NoHandling", func(t *testing.T) {
+		logger := &Logger{} // No error handler or fallback
+		// Should not panic
+		logger.handleError(errors.New("test error"))
+	})
+}
+
+// TestLogFormatFunctions tests the Debugf, Infof, etc. functions
+func TestLogFormatFunctions(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:  tempDir,
+		Outputs:  []io.Writer{buf},
+		LogLevel: DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	tests := []struct {
+		name     string
+		method   func(format string, v ...interface{})
+		expected string
+	}{
+		{
+			name: "Debugf",
+			method: func(format string, v ...interface{}) {
+				logger.Debugf(format, v...)
+			},
+			expected: "[DEBUG]",
+		},
+		{
+			name: "Infof",
+			method: func(format string, v ...interface{}) {
+				logger.Infof(format, v...)
+			},
+			expected: "[INFO]",
+		},
+		{
+			name: "Warnf",
+			method: func(format string, v ...interface{}) {
+				logger.Warnf(format, v...)
+			},
+			expected: "[WARN]",
+		},
+		{
+			name: "Errorf",
+			method: func(format string, v ...interface{}) {
+				logger.Errorf(format, v...)
+			},
+			expected: "[ERROR]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf.Reset()
+			msg := "test message"
+			tt.method("%s", msg)
+			logger.Flush()
+
+			output := buf.String()
+			if !strings.Contains(output, tt.expected) {
+				t.Errorf("Expected log level %q in output", tt.expected)
+			}
+			if !strings.Contains(output, msg) {
+				t.Errorf("Expected message %q in output", msg)
+			}
+		})
+	}
+}
+
+// TestFatalf tests the Fatalf function specifically
+func TestFatalf(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:  tempDir,
+		Outputs:  []io.Writer{buf},
+		LogLevel: DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Since Fatalf calls os.Exit, we need to test this in a subprocess
+	if os.Getenv("BE_FATAL") == "1" {
+		logger.Fatalf("fatal error: %s", "test")
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestFatalf")
+	cmd.Env = append(os.Environ(), "BE_FATAL=1")
+	err = cmd.Run()
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return
+	}
+	t.Fatalf("process ran with err %v, want exit status 1", err)
+}
+
+// TestGetCallerInfo tests the getCallerInfo function
+// func TestGetCallerInfo(t *testing.T) {
+// 	t.Run("CallerDisabled", func(t *testing.T) {
+// 		logger := &Logger{enableCaller: false}
+// 		if info := logger.getCallerInfo(); info != "" {
+// 			t.Errorf("Expected empty caller info when disabled, got %q", info)
+// 		}
+// 	})
+
+// 	t.Run("CallerEnabled", func(t *testing.T) {
+// 		logger := &Logger{enableCaller: true}
+
+// 		// Call through a helper function to get predictable caller info
+// 		callerInfo := func() string {
+// 			return logger.getCallerInfo()
+// 		}()
+
+// 		if callerInfo == "" {
+// 			t.Error("Expected non-empty caller info when enabled")
+// 		}
+
+// 		// Verify the format is something like "filename.go:123:functionName"
+// 		parts := strings.Split(callerInfo, ":")
+// 		if len(parts) < 2 {
+// 			t.Errorf("Unexpected caller info format: %q", callerInfo)
+// 		}
+// 	})
+
+// 	t.Run("RuntimeCallerFailure", func(t *testing.T) {
+// 		// This is hard to test directly since runtime.Caller is a built-in
+// 		// We can verify that the function handles the failure case gracefully
+// 		logger := &Logger{enableCaller: true}
+
+// 		// Force a failure by using an impossible skip value
+// 		origCaller := runtimeCaller
+// 		defer func() { runtimeCaller = origCaller }()
+
+// 		runtimeCaller = func(skip int) (pc uintptr, file string, line int, ok bool) {
+// 			return 0, "", 0, false
+// 		}
+
+// 		if info := logger.getCallerInfo(); info != "" {
+// 			t.Errorf("Expected empty caller info when runtime.Caller fails, got %q", info)
+// 		}
+// 	})
+// }
 
 // func TestGetCallerInfo(t *testing.T) {
 // 	tests := []struct {
