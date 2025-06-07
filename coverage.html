@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (90.2%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (90.3%)</option>
 				
 				</select>
 			</div>
@@ -441,36 +441,46 @@ func (l *Logger) formatPlain(level LogLevel, message, callerInfo string, fields 
         var builder strings.Builder
         builder.Grow(256) // Pre-allocate space for common case
 
+        // Write timestamp
         builder.WriteString(time.Now().Format(l.timestampFormat))
-        builder.WriteByte(' ')
-        builder.WriteByte('[')
-        builder.WriteString(level.String())
-        builder.WriteByte(']')
-        builder.WriteByte(' ')
 
+        // Write level in brackets
+        builder.WriteString(" [")
+        builder.WriteString(level.String())
+        builder.WriteString("] ")
+
+        // Write caller info if available
         if callerInfo != "" </span><span class="cov8" title="1">{
                 builder.WriteString(callerInfo)
-                builder.WriteByte(':')
+                builder.WriteString(": ")
         }</span>
 
+        // Write message
         <span class="cov8" title="1">builder.WriteString(message)
 
+        // Write fields if available
         if len(fields) &gt; 0 </span><span class="cov8" title="1">{
                 builder.WriteString(" {")
                 first := true
-                for k, v := range fields </span><span class="cov8" title="1">{
+                keys := make([]string, 0, len(fields))
+                for k := range fields </span><span class="cov8" title="1">{
+                        keys = append(keys, k)
+                }</span>
+                <span class="cov8" title="1">sort.Strings(keys) // Sort fields for consistent output
+
+                for _, k := range keys </span><span class="cov8" title="1">{
                         if !first </span><span class="cov8" title="1">{
                                 builder.WriteString(", ")
                         }</span>
                         <span class="cov8" title="1">first = false
                         builder.WriteString(k)
-                        builder.WriteByte('=')
-                        fmt.Fprintf(&amp;builder, "%v", v)</span>
+                        builder.WriteString("=")
+                        fmt.Fprintf(&amp;builder, "%v", fields[k])</span>
                 }
-                <span class="cov8" title="1">builder.WriteByte('}')</span>
+                <span class="cov8" title="1">builder.WriteString("}")</span>
         }
 
-        <span class="cov8" title="1">builder.WriteByte('\n')
+        <span class="cov8" title="1">builder.WriteString("\n")
         return builder.String()</span>
 }
 

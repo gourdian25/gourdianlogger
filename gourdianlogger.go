@@ -370,36 +370,46 @@ func (l *Logger) formatPlain(level LogLevel, message, callerInfo string, fields 
 	var builder strings.Builder
 	builder.Grow(256) // Pre-allocate space for common case
 
+	// Write timestamp
 	builder.WriteString(time.Now().Format(l.timestampFormat))
-	builder.WriteByte(' ')
-	builder.WriteByte('[')
-	builder.WriteString(level.String())
-	builder.WriteByte(']')
-	builder.WriteByte(' ')
 
+	// Write level in brackets
+	builder.WriteString(" [")
+	builder.WriteString(level.String())
+	builder.WriteString("] ")
+
+	// Write caller info if available
 	if callerInfo != "" {
 		builder.WriteString(callerInfo)
-		builder.WriteByte(':')
+		builder.WriteString(": ")
 	}
 
+	// Write message
 	builder.WriteString(message)
 
+	// Write fields if available
 	if len(fields) > 0 {
 		builder.WriteString(" {")
 		first := true
-		for k, v := range fields {
+		keys := make([]string, 0, len(fields))
+		for k := range fields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys) // Sort fields for consistent output
+
+		for _, k := range keys {
 			if !first {
 				builder.WriteString(", ")
 			}
 			first = false
 			builder.WriteString(k)
-			builder.WriteByte('=')
-			fmt.Fprintf(&builder, "%v", v)
+			builder.WriteString("=")
+			fmt.Fprintf(&builder, "%v", fields[k])
 		}
-		builder.WriteByte('}')
+		builder.WriteString("}")
 	}
 
-	builder.WriteByte('\n')
+	builder.WriteString("\n")
 	return builder.String()
 }
 
