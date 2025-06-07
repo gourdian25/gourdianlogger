@@ -404,7 +404,15 @@ func (l *Logger) asyncWorker() <span class="cov0" title="0">{
 }
 
 func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov0" title="0">{
-        l.fileMu.Lock()
+
+        if l.paused.Load() </span><span class="cov0" title="0">{
+                for _, buf := range buffers </span><span class="cov0" title="0">{
+                        l.bufferPool.Put(buf) // Return buffers to pool if paused
+                }</span>
+                <span class="cov0" title="0">return</span>
+        }
+
+        <span class="cov0" title="0">l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
         for _, buf := range buffers </span><span class="cov0" title="0">{
@@ -419,7 +427,13 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov0" title="0
 }
 
 func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov0" title="0">{
-        l.fileMu.Lock()
+
+        if l.paused.Load() </span><span class="cov0" title="0">{
+                l.bufferPool.Put(buf) // Return buffer to pool if paused
+                return
+        }</span>
+
+        <span class="cov0" title="0">l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
         if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{

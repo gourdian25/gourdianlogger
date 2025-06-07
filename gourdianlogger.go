@@ -333,6 +333,14 @@ func (l *Logger) asyncWorker() {
 }
 
 func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
+
+	if l.paused.Load() {
+		for _, buf := range buffers {
+			l.bufferPool.Put(buf) // Return buffers to pool if paused
+		}
+		return
+	}
+
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 
@@ -348,6 +356,12 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
 }
 
 func (l *Logger) writeBuffer(buf *bytes.Buffer) {
+
+	if l.paused.Load() {
+		l.bufferPool.Put(buf) // Return buffer to pool if paused
+		return
+	}
+
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 

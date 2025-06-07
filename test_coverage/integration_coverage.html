@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (63.9%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (63.8%)</option>
 				
 				</select>
 			</div>
@@ -387,7 +387,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                         }</span>
                 case &lt;-l.asyncCloseChan:<span class="cov8" title="1">
                         // Process remaining messages
-                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
+                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
                                 l.writeBatch(batch)
                         }</span>
                         // Drain the queue
@@ -404,7 +404,15 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
 }
 
 func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1">{
-        l.fileMu.Lock()
+
+        if l.paused.Load() </span><span class="cov8" title="1">{
+                for _, buf := range buffers </span><span class="cov8" title="1">{
+                        l.bufferPool.Put(buf) // Return buffers to pool if paused
+                }</span>
+                <span class="cov8" title="1">return</span>
+        }
+
+        <span class="cov8" title="1">l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
         for _, buf := range buffers </span><span class="cov8" title="1">{
@@ -419,7 +427,13 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1
 }
 
 func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
-        l.fileMu.Lock()
+
+        if l.paused.Load() </span><span class="cov0" title="0">{
+                l.bufferPool.Put(buf) // Return buffer to pool if paused
+                return
+        }</span>
+
+        <span class="cov8" title="1">l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
         if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
