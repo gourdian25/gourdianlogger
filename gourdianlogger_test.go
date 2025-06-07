@@ -1481,225 +1481,31 @@ func TestFatalf(t *testing.T) {
 }
 
 // TestGetCallerInfo tests the getCallerInfo function
-// func TestGetCallerInfo(t *testing.T) {
-// 	t.Run("CallerDisabled", func(t *testing.T) {
-// 		logger := &Logger{enableCaller: false}
-// 		if info := logger.getCallerInfo(); info != "" {
-// 			t.Errorf("Expected empty caller info when disabled, got %q", info)
-// 		}
-// 	})
+func TestGetCallerInfo(t *testing.T) {
+	t.Run("CallerDisabled", func(t *testing.T) {
+		logger := &Logger{enableCaller: false}
+		if info := logger.getCallerInfo(); info != "" {
+			t.Errorf("Expected empty caller info when disabled, got %q", info)
+		}
+	})
 
-// 	t.Run("CallerEnabled", func(t *testing.T) {
-// 		logger := &Logger{enableCaller: true}
+	t.Run("CallerEnabled", func(t *testing.T) {
+		logger := &Logger{enableCaller: true}
 
-// 		// Call through a helper function to get predictable caller info
-// 		callerInfo := func() string {
-// 			return logger.getCallerInfo()
-// 		}()
+		// Call through a helper function to get predictable caller info
+		callerInfo := func() string {
+			return logger.getCallerInfo()
+		}()
 
-// 		if callerInfo == "" {
-// 			t.Error("Expected non-empty caller info when enabled")
-// 		}
+		if callerInfo == "" {
+			t.Error("Expected non-empty caller info when enabled")
+		}
 
-// 		// Verify the format is something like "filename.go:123:functionName"
-// 		parts := strings.Split(callerInfo, ":")
-// 		if len(parts) < 2 {
-// 			t.Errorf("Unexpected caller info format: %q", callerInfo)
-// 		}
-// 	})
+		// Verify the format is something like "filename.go:123:functionName"
+		parts := strings.Split(callerInfo, ":")
+		if len(parts) < 2 {
+			t.Errorf("Unexpected caller info format: %q", callerInfo)
+		}
+	})
 
-// 	t.Run("RuntimeCallerFailure", func(t *testing.T) {
-// 		// This is hard to test directly since runtime.Caller is a built-in
-// 		// We can verify that the function handles the failure case gracefully
-// 		logger := &Logger{enableCaller: true}
-
-// 		// Force a failure by using an impossible skip value
-// 		origCaller := runtimeCaller
-// 		defer func() { runtimeCaller = origCaller }()
-
-// 		runtimeCaller = func(skip int) (pc uintptr, file string, line int, ok bool) {
-// 			return 0, "", 0, false
-// 		}
-
-// 		if info := logger.getCallerInfo(); info != "" {
-// 			t.Errorf("Expected empty caller info when runtime.Caller fails, got %q", info)
-// 		}
-// 	})
-// }
-
-// func TestGetCallerInfo(t *testing.T) {
-// 	tests := []struct {
-// 		name         string
-// 		enableCaller bool
-// 		expected     string
-// 	}{
-// 		{
-// 			name:         "CallerDisabled",
-// 			enableCaller: false,
-// 			expected:     "",
-// 		},
-// 		{
-// 			name:         "CallerEnabled",
-// 			enableCaller: true,
-// 			expected:     "gourdianlogger_test.go:", // We expect this file name
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			logger := &Logger{
-// 				enableCaller: tt.enableCaller,
-// 			}
-
-// 			callerInfo := logger.getCallerInfo()
-
-// 			if tt.enableCaller {
-// 				if callerInfo == "" {
-// 					t.Error("Expected caller info, got empty string")
-// 				}
-// 				if !strings.Contains(callerInfo, tt.expected) {
-// 					t.Errorf("Expected caller info to contain %q, got %q", tt.expected, callerInfo)
-// 				}
-// 			} else {
-// 				if callerInfo != "" {
-// 					t.Errorf("Expected empty caller info when disabled, got %q", callerInfo)
-// 				}
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestFormatMethods(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
-
-// 	config := LoggerConfig{
-// 		LogsDir: tempDir,
-// 		Outputs: []io.Writer{buf},
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
-
-// 	tests := []struct {
-// 		name     string
-// 		method   func()
-// 		expected string
-// 	}{
-// 		{
-// 			name: "Debugf",
-// 			method: func() {
-// 				logger.Debugf("debug %s", "message")
-// 			},
-// 			expected: "[DEBUG] debug message",
-// 		},
-// 		{
-// 			name: "Infof",
-// 			method: func() {
-// 				logger.Infof("info %s", "message")
-// 			},
-// 			expected: "[INFO] info message",
-// 		},
-// 		{
-// 			name: "Warnf",
-// 			method: func() {
-// 				logger.Warnf("warn %s", "message")
-// 			},
-// 			expected: "[WARN] warn message",
-// 		},
-// 		{
-// 			name: "Errorf",
-// 			method: func() {
-// 				logger.Errorf("error %s", "message")
-// 			},
-// 			expected: "[ERROR] error message",
-// 		},
-// 		{
-// 			name: "Fatalf",
-// 			method: func() {
-// 				logger.Fatalf("fatal %s", "message")
-// 			},
-// 			expected: "[FATAL] fatal message",
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			buf.Reset()
-// 			logger.SetLogLevel(DEBUG) // Ensure all levels are logged
-// 			tt.method()
-// 			logger.Flush()
-
-// 			if !strings.Contains(buf.String(), tt.expected) {
-// 				t.Errorf("Expected log to contain %q, got %q", tt.expected, buf.String())
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestCallerInfo(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
-
-// 	config := LoggerConfig{
-// 		LogsDir:      tempDir,
-// 		Outputs:      []io.Writer{buf},
-// 		EnableCaller: true,
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
-
-// 	// This function will appear in the caller info
-// 	logTestMessage := func() {
-// 		logger.Info("test message with caller")
-// 	}
-
-// 	logTestMessage()
-// 	logger.Flush()
-
-// 	output := buf.String()
-// 	if !strings.Contains(output, "logger_test.go") {
-// 		t.Error("Caller info not found in log output")
-// 	}
-// 	if !strings.Contains(output, "logTestMessage") {
-// 		t.Error("Function name not found in caller info")
-// 	}
-// }
-
-// func TestFatalLogging(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
-
-// 	config := LoggerConfig{
-// 		LogsDir: tempDir,
-// 		Outputs: []io.Writer{buf},
-// 	}
-
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-
-// 	// Use a fake exit function to test fatal behavior
-// 	exitCalled := false
-// 	origExit := osExit
-// 	defer func() { osExit = origExit }()
-// 	osExit = func(code int) { exitCalled = true }
-
-// 	logger.Fatal("fatal message")
-
-// 	if !exitCalled {
-// 		t.Error("Fatal log did not trigger exit")
-// 	}
-
-// 	if !strings.Contains(buf.String(), "fatal message") {
-// 		t.Error("Fatal message not logged")
-// 	}
-// }
+}

@@ -446,25 +446,22 @@ func (l *Logger) getCallerInfo() string {
 		return ""
 	}
 
+	// Get function name
 	fn := runtime.FuncForPC(pc)
 	if fn == nil {
 		return fmt.Sprintf("%s:%d", filepath.Base(file), line)
 	}
 
-	// Get the full function name
-	fullFnName := fn.Name()
-
-	// Extract just the last part of the package path and function name
-	lastSlash := strings.LastIndex(fullFnName, "/")
-	if lastSlash < 0 {
-		lastSlash = 0
+	// Extract just the function name without package path
+	fnName := fn.Name()
+	if lastSlash := strings.LastIndex(fnName, "/"); lastSlash >= 0 {
+		fnName = fnName[lastSlash+1:]
 	}
-	lastDot := strings.LastIndex(fullFnName[lastSlash:], ".")
-	if lastDot < 0 {
-		return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash:])
+	if lastDot := strings.LastIndex(fnName, "."); lastDot >= 0 {
+		fnName = fnName[lastDot+1:]
 	}
 
-	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash+lastDot+1:])
+	return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fnName)
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
