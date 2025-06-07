@@ -311,9 +311,11 @@ func (l *Logger) asyncWorker() {
 				batch = batch[:0]
 			}
 		case <-l.asyncCloseChan:
+			// Process remaining messages
 			if len(batch) > 0 {
 				l.writeBatch(batch)
 			}
+			// Drain the queue
 			for {
 				select {
 				case buf := <-l.asyncQueue:
@@ -468,7 +470,7 @@ func (l *Logger) getCallerInfo() string {
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) {
-	if l.paused.Load() {
+	if l.closed.Load() || l.paused.Load() {
 		return
 	}
 
@@ -656,13 +658,16 @@ func (l *Logger) Close() error {
 		return nil
 	}
 
-	close(l.rotateCloseChan)
+	// First stop accepting new messages
 	if l.asyncCloseChan != nil {
 		close(l.asyncCloseChan)
 	}
+	close(l.rotateCloseChan)
 
+	// Wait for all workers to finish processing
 	l.wg.Wait()
 
+	// Now safely close the file
 	l.fileMu.Lock()
 	defer l.fileMu.Unlock()
 

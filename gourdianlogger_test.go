@@ -321,40 +321,40 @@ func TestLogLevelFiltering(t *testing.T) {
 	}
 }
 
-// // TestAsyncLogging tests the async logging functionality
-// func TestAsyncLogging(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+// TestAsyncLogging tests the async logging functionality
+func TestAsyncLogging(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	config := LoggerConfig{
-// 		LogsDir:      tempDir,
-// 		Outputs:      []io.Writer{buf},
-// 		BufferSize:   100,
-// 		AsyncWorkers: 1,
-// 	}
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		BufferSize:   100,
+		AsyncWorkers: 1,
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
 
-// 	// Log enough messages to fill the buffer
-// 	for i := 0; i < 150; i++ {
-// 		logger.Info(fmt.Sprintf("message %d", i))
-// 	}
+	// Log enough messages to fill the buffer
+	for i := 0; i < 150; i++ {
+		logger.Info(fmt.Sprintf("message %d", i))
+	}
 
-// 	// Close to flush all messages
-// 	logger.Close()
+	// Close to flush all messages
+	logger.Close()
 
-// 	// Verify all messages were written
-// 	output := buf.String()
-// 	for i := 0; i < 150; i++ {
-// 		if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
-// 			t.Errorf("Missing message %d in output", i)
-// 			break
-// 		}
-// 	}
-// }
+	// Verify all messages were written
+	output := buf.String()
+	for i := 0; i < 150; i++ {
+		if !strings.Contains(output, fmt.Sprintf("message %d", i)) {
+			t.Errorf("Missing message %d in output", i)
+			break
+		}
+	}
+}
 
 // TestLogRotation tests the log rotation functionality
 func TestLogRotation(t *testing.T) {
