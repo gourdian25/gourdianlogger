@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestIntegrationLogRotationWithMultipleFiles tests the complete log rotation cycle
@@ -514,6 +515,430 @@ func TestIntegrationRateLimitingWithConcurrency(t *testing.T) {
 		t.Errorf("Expected <=%d messages due to rate limiting, got %d", expectedMax, count)
 	}
 }
+
+func TestIntegrationCustomTimestampFormat(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	customFormat := "2006-Jan-02 15:04:05"
+	config := LoggerConfig{
+		LogsDir:         tempDir,
+		Outputs:         []io.Writer{buf},
+		TimestampFormat: customFormat,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	testTime := time.Now()
+	logger.Info("timestamp test")
+	logger.Flush()
+
+	output := buf.String()
+	expected := testTime.Format(customFormat)
+	if !strings.Contains(output, expected) {
+		t.Errorf("Expected timestamp format %q, got: %q", expected, output)
+	}
+}
+
+func TestIntegrationCallerInformation(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		EnableCaller: true,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	logger.Info("caller info test")
+	logger.Flush()
+
+	output := buf.String()
+	if !strings.Contains(output, "gourdianlogger_integration_test.go") {
+		t.Error("Expected caller information in log output")
+	}
+}
+
+func TestIntegrationPauseResume(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir: tempDir,
+		Outputs: []io.Writer{buf},
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Log initial message
+	logger.Info("before pause")
+
+	// Pause logging
+	logger.Pause()
+	if !logger.IsPaused() {
+		t.Error("Logger should be paused")
+	}
+
+	// These messages should not be logged
+	logger.Info("during pause 1")
+	logger.Info("during pause 2")
+
+	// Resume logging
+	logger.Resume()
+	if logger.IsPaused() {
+		t.Error("Logger should be resumed")
+	}
+
+	logger.Info("after resume")
+	logger.Flush()
+
+	output := buf.String()
+
+	// Verify expected messages
+	if !strings.Contains(output, "before pause") {
+		t.Error("Missing message before pause")
+	}
+	if strings.Contains(output, "during pause") {
+		t.Error("Logger logged messages while paused")
+	}
+	if !strings.Contains(output, "after resume") {
+		t.Error("Missing message after resume")
+	}
+}
+
+func TestIntegrationPrettyPrintedJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:     tempDir,
+		Outputs:     []io.Writer{buf},
+		LogFormat:   FormatJSON,
+		PrettyPrint: true,
+		CustomFields: map[string]interface{}{
+			"service": "test-service",
+		},
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	logger.InfoWithFields(map[string]interface{}{
+		"user": "testuser",
+	}, "pretty json test")
+	logger.Flush()
+
+	output := buf.String()
+
+	// Verify it's pretty printed (has indentation)
+	if !strings.Contains(output, "  \"") {
+		t.Error("JSON output is not pretty printed")
+	}
+
+	// Verify all fields are present
+	expectedFields := []string{
+		`"service": "test-service"`,
+		`"user": "testuser"`,
+		`"message": "pretty json test"`,
+		`"level": "INFO"`,
+	}
+
+	for _, field := range expectedFields {
+		if !strings.Contains(output, field) {
+			t.Errorf("Missing expected field in JSON: %q", field)
+		}
+	}
+}
+
+func TestIntegrationOutputRemoval(t *testing.T) {
+	tempDir := t.TempDir()
+	buf1 := &bytes.Buffer{}
+	buf2 := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir: tempDir,
+		Outputs: []io.Writer{buf1, buf2},
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Log to both outputs
+	logger.Info("message to both")
+	logger.Flush()
+
+	// Remove one output
+	logger.RemoveOutput(buf1)
+
+	// Log again
+	logger.Info("message to one")
+	logger.Flush()
+
+	// Verify first output only got the first message
+	output1 := buf1.String()
+	if strings.Count(output1, "message") != 1 {
+		t.Error("First output received wrong number of messages after removal")
+	}
+
+	// Verify second output got both messages
+	output2 := buf2.String()
+	if strings.Count(output2, "message") != 2 {
+		t.Error("Second output missing messages")
+	}
+}
+
+func TestIntegrationBufferPoolEfficiency(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:    tempDir,
+		Outputs:    []io.Writer{buf},
+		BufferSize: 1000,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Get initial pool stats (not exposed, so we'll just test behavior)
+	initialAllocs := testing.AllocsPerRun(10, func() {
+		logger.Info("test message")
+	})
+
+	// After warmup, allocations should be minimal
+	allocs := testing.AllocsPerRun(100, func() {
+		logger.Info("test message")
+	})
+
+	if allocs > initialAllocs*2 {
+		t.Errorf("High allocation count: got %v, expected similar to initial %v", allocs, initialAllocs)
+	}
+
+	logger.Flush()
+}
+
+func TestIntegrationCustomFieldsInAllMessages(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:   tempDir,
+		Outputs:   []io.Writer{buf},
+		LogFormat: FormatJSON,
+		CustomFields: map[string]interface{}{
+			"service":  "auth",
+			"instance": 1,
+		},
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Log messages at different levels
+	logger.Debug("debug message")
+	logger.Info("info message")
+	logger.Warn("warn message")
+	logger.Error("error message")
+	logger.Flush()
+
+	output := buf.String()
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &data); err != nil {
+			t.Errorf("Invalid JSON: %v", err)
+			continue
+		}
+
+		// Verify custom fields exist in each message
+		if data["service"] != "auth" {
+			t.Error("Missing service field in log message")
+		}
+		if data["instance"] != float64(1) { // JSON unmarshal converts to float64
+			t.Error("Missing instance field in log message")
+		}
+	}
+}
+
+// func TestIntegrationHighConcurrencyWithRateLimiting(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	rateLimit := 50 // messages per second
+// 	config := LoggerConfig{
+// 		LogsDir:    tempDir,
+// 		Outputs:    []io.Writer{buf},
+// 		MaxLogRate: rateLimit,
+// 		BufferSize: 1000,
+// 	}
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	var wg sync.WaitGroup
+// 	messages := 500
+// 	start := time.Now()
+
+// 	for i := 0; i < messages; i++ {
+// 		wg.Add(1)
+// 		go func(num int) {
+// 			defer wg.Done()
+// 			logger.Info(fmt.Sprintf("message %d", num))
+// 		}(i)
+// 	}
+
+// 	wg.Wait()
+// 	logger.Flush()
+// 	duration := time.Since(start)
+
+// 	// Count the messages that got through
+// 	output := buf.String()
+// 	count := strings.Count(output, "message")
+
+// 	// Verify rate limiting was approximately enforced
+// 	expectedMax := int(float64(rateLimit)*duration.Seconds()) + 20 // Allow some buffer
+// 	if count > expectedMax {
+// 		t.Errorf("Rate limiting failed: got %d messages in %v (max expected ~%d)",
+// 			count, duration, expectedMax)
+// 	}
+// }
+// func TestIntegrationDynamicLogLevelFunction(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir:  tempDir,
+// 		Outputs:  []io.Writer{buf},
+// 		LogLevel: INFO, // Initial level
+// 	}
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	// Set up dynamic level function that toggles between DEBUG and ERROR
+// 	toggle := true
+// 	logger.SetDynamicLevelFunc(func() LogLevel {
+// 		if toggle {
+// 			toggle = false
+// 			return DEBUG
+// 		}
+// 		toggle = true
+// 		return ERROR
+// 	})
+
+// 	// These messages should alternate between being logged and not
+// 	logger.Debug("debug message 1") // Should log (DEBUG >= DEBUG)
+// 	logger.Info("info message 1")   // Should log (INFO >= DEBUG)
+// 	logger.Debug("debug message 2") // Should NOT log (DEBUG < ERROR)
+// 	logger.Info("info message 2")   // Should NOT log (INFO < ERROR)
+// 	logger.Debug("debug message 3") // Should log (DEBUG >= DEBUG)
+// 	logger.Info("info message 3")   // Should log (INFO >= DEBUG)
+
+// 	logger.Flush()
+
+// 	output := buf.String()
+
+// 	// Verify expected messages
+// 	expected := []string{
+// 		"debug message 1",
+// 		"info message 1",
+// 		"debug message 3",
+// 		"info message 3",
+// 	}
+// 	notExpected := []string{
+// 		"debug message 2",
+// 		"info message 2",
+// 	}
+
+// 	for _, s := range expected {
+// 		if !strings.Contains(output, s) {
+// 			t.Errorf("Expected output to contain %q", s)
+// 		}
+// 	}
+
+// 	for _, s := range notExpected {
+// 		if strings.Contains(output, s) {
+// 			t.Errorf("Expected output not to contain %q", s)
+// 		}
+// 	}
+// }
+
+// func TestIntegrationFatalLogging(t *testing.T) {
+// 	tempDir := t.TempDir()
+// 	buf := &bytes.Buffer{}
+
+// 	config := LoggerConfig{
+// 		LogsDir: tempDir,
+// 		Outputs: []io.Writer{buf},
+// 	}
+
+// 	// Use a fake exit function to test fatal behavior
+// 	exitCalled := false
+// 	fakeExit := func(int) { exitCalled = true }
+
+// 	logger, err := NewGourdianLogger(config)
+// 	if err != nil {
+// 		t.Fatalf("Failed to create logger: %v", err)
+// 	}
+// 	defer logger.Close()
+
+// 	// Replace os.Exit for this test
+// 	oldExit := osExit
+// 	osExit = fakeExit
+// 	defer func() { osExit = oldExit }()
+
+// 	logger.Fatal("fatal message")
+// 	logger.Flush()
+
+// 	if !exitCalled {
+// 		t.Error("Fatal log did not trigger exit")
+// 	}
+
+// 	output := buf.String()
+// 	if !strings.Contains(output, "fatal message") {
+// 		t.Error("Fatal message not logged")
+// 	}
+// 	if !strings.Contains(output, "FATAL") {
+// 		t.Error("Missing FATAL level in output")
+// 	}
+// }
 
 // // TestIntegrationPauseResumeWithConcurrency tests pause/resume functionality under concurrent load
 // func TestIntegrationPauseResumeWithConcurrency(t *testing.T) {

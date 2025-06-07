@@ -1,3 +1,5 @@
+# File: prompt.txt
+
 // File: gourdianlogger.go
 
 package gourdianlogger
