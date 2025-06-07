@@ -186,6 +186,7 @@ type Logger struct {
 	rateLimiter     *rate.Limiter
 	config          LoggerConfig
 	dynamicLevelFn  func() LogLevel
+	paused          atomic.Bool // New field to track pause state
 }
 
 type logEntry struct {
@@ -807,6 +808,11 @@ func (l *Logger) formatMessage(level LogLevel, message string, callerInfo string
 
 // log is the internal logging method
 func (l *Logger) log(level LogLevel, message string, skip int, fields map[string]interface{}) {
+	// Check if logger is paused
+	if l.paused.Load() {
+		return
+	}
+
 	// Apply rate limiting if configured
 	if l.rateLimiter != nil && !l.rateLimiter.Allow() {
 		return
@@ -1098,6 +1104,53 @@ func (l *Logger) Close() error {
 		return l.file.Close()
 	}
 	return nil
+}
+
+// Pause temporarily stops all logging output.
+// Log calls will be ignored until Resume() is called.
+// Useful for suppressing logs during sensitive operations.
+//
+// Example:
+//
+//	logger.Pause()
+//	defer logger.Resume()
+//	// Code that shouldn't produce logs
+func (l *Logger) Pause() {
+	l.paused.Store(true)
+}
+
+// Resume restarts logging after a Pause().
+// Returns logging to normal operation.
+func (l *Logger) Resume() {
+	l.paused.Store(false)
+}
+
+// IsPaused checks if the logger is currently paused.
+//
+// Returns:
+//
+//	bool: true if logging is paused, false otherwise
+func (l *Logger) IsPaused() bool {
+	return l.paused.Load()
+}
+
+// WithPause executes a function with logging paused, then resumes logging.
+// Ensures logging is properly resumed even if the function panics.
+//
+// Parameters:
+//
+//	fn: Function to execute with logging paused
+//
+// Example:
+//
+//	logger.WithPause(func() {
+//	    // Critical section where we don't want logs
+//	    performSensitiveOperation()
+//	})
+func (l *Logger) WithPause(fn func()) {
+	l.Pause()
+	defer l.Resume()
+	fn()
 }
 
 // Debug logs a message at DEBUG level.
