@@ -83,7 +83,7 @@ coverage-summary-integration: $(COVERAGE_DIR)
 
 .PHONY: bench
 bench:
-	go test -bench=. -benchmem .
+	go test -bench=. -benchmem -run=^$$ .
 
 # Clean coverage files
 .PHONY: clean-coverage
