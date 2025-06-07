@@ -228,7 +228,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
-func NewGourdianLoggerWithDefault() (*Logger, error) {
+func NewDefaultGourdianLogger() (*Logger, error) {
 	config := LoggerConfig{
 		Filename:        defaultFileName,
 		MaxBytes:        defaultMaxBytes,
