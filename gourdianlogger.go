@@ -19,21 +19,27 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// LogLevel represents the severity level of a log message.
+// The levels are ordered from least to most severe:
+// DEBUG < INFO < WARN < ERROR < FATAL.
 type LogLevel int32
 
+// Constants defining the available log levels.
 const (
-	DEBUG LogLevel = iota
-	INFO
-	WARN
-	ERROR
-	FATAL
+	DEBUG LogLevel = iota // Debug-level messages for development
+	INFO                  // Informational messages about normal operation
+	WARN                  // Warning messages about potential issues
+	ERROR                 // Error messages about problems that need attention
+	FATAL                 // Fatal messages about critical errors that force shutdown
 )
 
+// LogFormat represents the format in which logs will be written.
 type LogFormat int
 
+// Constants defining available log formats.
 const (
-	FormatPlain LogFormat = iota
-	FormatJSON
+	FormatPlain LogFormat = iota // Plain text format (human-readable)
+	FormatJSON                   // JSON format (machine-readable)
 )
 
 var (
@@ -51,26 +57,30 @@ var (
 	defaultTimestampFormat       = "2006-01-02 15:04:05.000000"
 )
 
+// LoggerConfig contains configuration options for the logger.
+// All fields have sensible defaults and are optional.
 type LoggerConfig struct {
-	BackupCount     int                    `json:"backup_count"`
-	BufferSize      int                    `json:"buffer_size"`
-	AsyncWorkers    int                    `json:"async_workers"`
-	MaxLogRate      int                    `json:"max_log_rate"`
-	EnableCaller    bool                   `json:"enable_caller"`
-	EnableFallback  bool                   `json:"enable_fallback"`
-	PrettyPrint     bool                   `json:"pretty_print"`
-	MaxBytes        int64                  `json:"max_bytes"`
-	Filename        string                 `json:"filename"`
-	TimestampFormat string                 `json:"timestamp_format"`
-	LogsDir         string                 `json:"logs_dir"`
-	FormatStr       string                 `json:"format"`
-	LogLevel        LogLevel               `json:"log_level"`
-	CustomFields    map[string]interface{} `json:"custom_fields"`
-	Outputs         []io.Writer            `json:"-"`
-	LogFormat       LogFormat              `json:"-"`
-	ErrorHandler    func(error)            `json:"-"`
+	BackupCount     int                    `json:"backup_count"`     // Number of backup log files to keep (default: 5)
+	BufferSize      int                    `json:"buffer_size"`      // Size of the async buffer in messages (0 for synchronous logging, default: 0)
+	AsyncWorkers    int                    `json:"async_workers"`    // Number of async worker goroutines (default: 1)
+	MaxLogRate      int                    `json:"max_log_rate"`     // Maximum number of logs per second (0 for no limit, default: 0)
+	EnableCaller    bool                   `json:"enable_caller"`    // Whether to include caller information (file:line:function) (default: true)
+	EnableFallback  bool                   `json:"enable_fallback"`  // Whether to fallback to stderr when logging fails (default: true)
+	PrettyPrint     bool                   `json:"pretty_print"`     // Pretty-print JSON logs (only applies to JSON format, default: false)
+	MaxBytes        int64                  `json:"max_bytes"`        // Maximum size in bytes before rotating log file (default: 10MB)
+	Filename        string                 `json:"filename"`         // Base filename for logs (without extension, default: "gourdianlogs")
+	TimestampFormat string                 `json:"timestamp_format"` // Timestamp format (default: "2006-01-02 15:04:05.000000")
+	LogsDir         string                 `json:"logs_dir"`         // Directory to store log files (default: "logs")
+	FormatStr       string                 `json:"format"`           // Format string ("PLAIN" or "JSON", default: "PLAIN")
+	LogLevel        LogLevel               `json:"log_level"`        // Default log level (default: DEBUG)
+	CustomFields    map[string]interface{} `json:"custom_fields"`    // Custom fields to include in every log message (JSON format only)
+	Outputs         []io.Writer            `json:"-"`                // Additional output writers (e.g., network connections, other files)
+	LogFormat       LogFormat              `json:"-"`                // Log format (overrides FormatStr if set)
+	ErrorHandler    func(error)            `json:"-"`                // Error handler function for logging errors
 }
 
+// Logger is the main logging struct that provides all logging functionality.
+// It should be created using NewGourdianLogger() or NewDefaultGourdianLogger().
 type Logger struct {
 	fileMu          sync.Mutex
 	outputsMu       sync.RWMutex
@@ -118,6 +128,15 @@ func (l LogLevel) String() string {
 	}
 }
 
+// ParseLogLevel converts a string representation of a log level to a LogLevel constant.
+// Valid strings (case-insensitive): "DEBUG", "INFO", "WARN"/"WARNING", "ERROR", "FATAL".
+//
+// Example:
+//
+//	level, err := ParseLogLevel("info") // Returns INFO, nil
+//	if err != nil {
+//	    // handle error
+//	}
 func ParseLogLevel(level string) (LogLevel, error) {
 	switch strings.ToUpper(level) {
 	case "DEBUG":
@@ -135,6 +154,20 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
+// NewGourdianLogger creates a new Logger with the specified configuration.
+// The configuration is validated and defaults are applied for missing values.
+//
+// Example:
+//
+//	config := LoggerConfig{
+//	    Filename: "myapp",
+//	    LogLevel: INFO,
+//	    MaxBytes: 5 * 1024 * 1024, // 5MB
+//	}
+//	logger, err := NewGourdianLogger(config)
+//	if err != nil {
+//	    panic(err)
+//	}
 func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -232,6 +265,16 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) {
 	return logger, nil
 }
 
+// NewDefaultGourdianLogger creates a new Logger with default configuration.
+// This is the simplest way to create a logger with sensible defaults.
+//
+// Example:
+//
+//	logger, err := NewDefaultGourdianLogger()
+//	if err != nil {
+//	    panic(err)
+//	}
+//	defer logger.Close()
 func NewDefaultGourdianLogger() (*Logger, error) {
 	config := LoggerConfig{
 		Filename:        defaultFileName,
@@ -250,6 +293,8 @@ func NewDefaultGourdianLogger() (*Logger, error) {
 	return NewGourdianLogger(config)
 }
 
+// Validate checks the LoggerConfig for invalid values.
+// Returns an error if any configuration value is invalid.
 func (lc *LoggerConfig) Validate() error {
 	if lc.MaxBytes < 0 {
 		return fmt.Errorf("MaxBytes cannot be negative")
@@ -659,6 +704,14 @@ func (l *Logger) cleanupOldBackups() {
 	}
 }
 
+// Flush ensures all buffered log messages are written to their destinations.
+// This is particularly important for asynchronous logging to ensure messages
+// are written before program exit.
+//
+// Example:
+//
+//	logger.Info("Important message")
+//	logger.Flush() // Ensure message is written before proceeding
 func (l *Logger) Flush() {
 	if l.asyncQueue != nil {
 		// Wait for the queue to be empty
@@ -677,18 +730,50 @@ func (l *Logger) Flush() {
 	}
 }
 
+// SetLogLevel changes the minimum log level that will be processed.
+// Messages below this level will be ignored.
+//
+// Example:
+//
+//	logger.SetLogLevel(gourdianlogger.WARN) // Only log WARN and above
 func (l *Logger) SetLogLevel(level LogLevel) {
 	l.level.Store(int32(level))
 }
 
+// GetLogLevel returns the current minimum log level.
+//
+// Example:
+//
+//	if logger.GetLogLevel() <= gourdianlogger.DEBUG {
+//	    logger.Debug("Debug message")
+//	}
 func (l *Logger) GetLogLevel() LogLevel {
 	return LogLevel(l.level.Load())
 }
 
+// SetDynamicLevelFunc sets a function that will be called for each log message
+// to determine the current log level. This allows for runtime log level changes
+// without requiring explicit synchronization.
+//
+// Example:
+//
+//	logger.SetDynamicLevelFunc(func() LogLevel {
+//	    if config.DebugMode {
+//	        return DEBUG
+//	    }
+//	    return INFO
+//	})
 func (l *Logger) SetDynamicLevelFunc(fn func() LogLevel) {
 	l.dynamicLevelFn = fn
 }
 
+// AddOutput adds an additional io.Writer destination for log messages.
+// Useful for sending logs to multiple destinations (e.g., file and network).
+//
+// Example:
+//
+//	file, _ := os.Create("additional.log")
+//	logger.AddOutput(file)
 func (l *Logger) AddOutput(output io.Writer) {
 	if output == nil {
 		return
@@ -705,6 +790,11 @@ func (l *Logger) AddOutput(output io.Writer) {
 	l.multiWriter = io.MultiWriter(l.outputs...)
 }
 
+// RemoveOutput removes a previously added output writer.
+//
+// Example:
+//
+//	logger.RemoveOutput(os.Stdout) // Stop logging to stdout
 func (l *Logger) RemoveOutput(output io.Writer) {
 	l.outputsMu.Lock()
 	defer l.outputsMu.Unlock()
@@ -721,6 +811,13 @@ func (l *Logger) RemoveOutput(output io.Writer) {
 		}
 	}
 }
+
+// Close cleanly shuts down the logger, flushing any buffered messages
+// and closing open files. Should be called before program exit.
+//
+// Example:
+//
+//	defer logger.Close()
 func (l *Logger) Close() error {
 	if !l.closed.CompareAndSwap(false, true) {
 		return nil
@@ -756,104 +853,175 @@ func (l *Logger) Close() error {
 	return nil
 }
 
+// IsClosed returns true if the logger has been closed.
+//
+// Example:
+//
+//	if !logger.IsClosed() {
+//	    logger.Info("Still logging")
+//	}
 func (l *Logger) IsClosed() bool {
 	return l.closed.Load()
 }
 
+// Pause temporarily stops processing log messages.
+// Useful for reducing logging overhead during critical sections.
+//
+// Example:
+//
+//	logger.Pause()
+//	defer logger.Resume()
+//	// Critical section with minimal overhead
 func (l *Logger) Pause() {
 	l.paused.Store(true)
 }
 
+// Resume resumes processing of log messages after a Pause().
 func (l *Logger) Resume() {
 	l.paused.Store(false)
 }
 
+// IsPaused returns true if the logger is currently paused.
 func (l *Logger) IsPaused() bool {
 	return l.paused.Load()
 }
 
+// Debug logs a message at DEBUG level.
+// Arguments are handled like fmt.Sprint().
+//
+// Example:
+//
+//	logger.Debug("Current value:", value)
 func (l *Logger) Debug(v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), nil)
 }
 
+// Info logs a message at INFO level.
+// Arguments are handled like fmt.Sprint().
 func (l *Logger) Info(v ...interface{}) {
 	l.log(INFO, fmt.Sprint(v...), nil)
 }
 
+// Warn logs a message at WARN level.
+// Arguments are handled like fmt.Sprint().
 func (l *Logger) Warn(v ...interface{}) {
 	l.log(WARN, fmt.Sprint(v...), nil)
 }
 
+// Error logs a message at ERROR level.
+// Arguments are handled like fmt.Sprint().
 func (l *Logger) Error(v ...interface{}) {
 	l.log(ERROR, fmt.Sprint(v...), nil)
 }
 
+// Fatal logs a message at FATAL level and exits the program with status 1.
+// Arguments are handled like fmt.Sprint().
 func (l *Logger) Fatal(v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), nil)
 	// l.Flush()
 	// os.Exit(1)
 }
 
+// Debugf logs a formatted message at DEBUG level.
+// Arguments are handled like fmt.Sprintf().
+//
+// Example:
+//
+//	logger.Debugf("User %s logged in from %s", user, ip)
 func (l *Logger) Debugf(format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), nil)
 }
 
+// Infof logs a formatted message at INFO level.
+// Arguments are handled like fmt.Sprintf().
 func (l *Logger) Infof(format string, v ...interface{}) {
 	l.log(INFO, fmt.Sprintf(format, v...), nil)
 }
 
+// Warnf logs a formatted message at WARN level.
+// Arguments are handled like fmt.Sprintf().
 func (l *Logger) Warnf(format string, v ...interface{}) {
 	l.log(WARN, fmt.Sprintf(format, v...), nil)
 }
 
+// Errorf logs a formatted message at ERROR level.
+// Arguments are handled like fmt.Sprintf().
 func (l *Logger) Errorf(format string, v ...interface{}) {
 	l.log(ERROR, fmt.Sprintf(format, v...), nil)
 }
 
+// Fatalf logs a formatted message at FATAL level and exits the program with status 1.
+// Arguments are handled like fmt.Sprintf().
 func (l *Logger) Fatalf(format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), nil)
 	// l.Flush()
 	// os.Exit(1)
 }
 
+// DebugWithFields logs a message at DEBUG level with additional structured fields.
+// Fields will be included in JSON output or as key-value pairs in text output.
+//
+// Example:
+//
+//	logger.DebugWithFields(map[string]interface{}{
+//	    "user": username,
+//	    "attempt": 3,
+//	}, "Login attempt")
 func (l *Logger) DebugWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprint(v...), fields)
 }
 
+// InfoWithFields logs a message at INFO level with additional structured fields.
 func (l *Logger) InfoWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(INFO, fmt.Sprint(v...), fields)
 }
 
+// WarnWithFields logs a message at WARN level with additional structured fields.
 func (l *Logger) WarnWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(WARN, fmt.Sprint(v...), fields)
 }
 
+// ErrorWithFields logs a message at ERROR level with additional structured fields.
 func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(ERROR, fmt.Sprint(v...), fields)
 }
 
+// FatalWithFields logs a message at FATAL level with additional structured fields
+// and exits the program with status 1.
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) {
 	l.log(FATAL, fmt.Sprint(v...), fields)
 	l.Flush()
 	os.Exit(1)
 }
 
+// DebugfWithFields logs a formatted message at DEBUG level with additional structured fields.
+//
+// Example:
+//
+//	logger.DebugfWithFields(map[string]interface{}{
+//	    "duration": dur,
+//	}, "Process took %.2f seconds", dur.Seconds())
 func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(DEBUG, fmt.Sprintf(format, v...), fields)
 }
 
+// InfofWithFields logs a formatted message at INFO level with additional structured fields.
 func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(INFO, fmt.Sprintf(format, v...), fields)
 }
 
+// WarnfWithFields logs a formatted message at WARN level with additional structured fields.
 func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(WARN, fmt.Sprintf(format, v...), fields)
 }
 
+// ErrorfWithFields logs a formatted message at ERROR level with additional structured fields.
 func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(ERROR, fmt.Sprintf(format, v...), fields)
 }
 
+// FatalfWithFields logs a formatted message at FATAL level with additional structured fields
+// and exits the program with status 1.
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) {
 	l.log(FATAL, fmt.Sprintf(format, v...), fields)
 	l.Flush()
