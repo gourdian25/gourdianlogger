@@ -136,7 +136,7 @@ github.com/gourdian25/gourdianlogger/gourdianlogger.go:489.2,489.26 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:489.26,490.29 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:490.29,492.4 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:496.2,497.29 2 1
-github.com/gourdian25/gourdianlogger/gourdianlogger.go:497.29,499.3 1 0
+github.com/gourdian25/gourdianlogger/gourdianlogger.go:497.29,499.3 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:499.8,501.3 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:503.2,503.26 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:503.26,505.3 1 1
@@ -187,7 +187,7 @@ github.com/gourdian25/gourdianlogger/gourdianlogger.go:641.2,641.24 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:641.24,644.3 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:647.46,649.2 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:651.41,653.2 1 0
-github.com/gourdian25/gourdianlogger/gourdianlogger.go:655.58,657.2 1 0
+github.com/gourdian25/gourdianlogger/gourdianlogger.go:655.58,657.2 1 1
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:659.46,660.19 1 0
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:660.19,662.3 1 0
 github.com/gourdian25/gourdianlogger/gourdianlogger.go:664.2,667.21 3 0

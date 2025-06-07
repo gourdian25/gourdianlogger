@@ -838,69 +838,71 @@ func TestIntegrationHighConcurrencyWithRateLimiting(t *testing.T) {
 	}
 }
 
-// func TestIntegrationDynamicLogLevelFunction(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+func TestIntegrationDynamicLogLevelFunction(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &bytes.Buffer{}
 
-// 	config := LoggerConfig{
-// 		LogsDir:  tempDir,
-// 		Outputs:  []io.Writer{buf},
-// 		LogLevel: INFO, // Initial level
-// 	}
+	config := LoggerConfig{
+		LogsDir:  tempDir,
+		Outputs:  []io.Writer{buf},
+		LogLevel: INFO, // Initial level
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	// Set up dynamic level function that toggles between DEBUG and ERROR
-// 	toggle := true
-// 	logger.SetDynamicLevelFunc(func() LogLevel {
-// 		if toggle {
-// 			toggle = false
-// 			return DEBUG
-// 		}
-// 		toggle = true
-// 		return ERROR
-// 	})
+	// Use a counter to make the level changes more predictable
+	callCount := 0
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		callCount++
+		// First two log calls: DEBUG
+		// Next two log calls: ERROR
+		// Last two log calls: DEBUG
+		if callCount <= 2 || callCount > 4 {
+			return DEBUG
+		}
+		return ERROR
+	})
 
-// 	// These messages should alternate between being logged and not
-// 	logger.Debug("debug message 1") // Should log (DEBUG >= DEBUG)
-// 	logger.Info("info message 1")   // Should log (INFO >= DEBUG)
-// 	logger.Debug("debug message 2") // Should NOT log (DEBUG < ERROR)
-// 	logger.Info("info message 2")   // Should NOT log (INFO < ERROR)
-// 	logger.Debug("debug message 3") // Should log (DEBUG >= DEBUG)
-// 	logger.Info("info message 3")   // Should log (INFO >= DEBUG)
+	// These messages should alternate between being logged and not
+	logger.Debug("debug message 1") // Should log (DEBUG >= DEBUG)
+	logger.Info("info message 1")   // Should log (INFO >= DEBUG)
+	logger.Debug("debug message 2") // Should NOT log (DEBUG < ERROR)
+	logger.Info("info message 2")   // Should NOT log (INFO < ERROR)
+	logger.Debug("debug message 3") // Should log (DEBUG >= DEBUG)
+	logger.Info("info message 3")   // Should log (INFO >= DEBUG)
 
-// 	logger.Flush()
+	logger.Flush()
 
-// 	output := buf.String()
+	output := buf.String()
 
-// 	// Verify expected messages
-// 	expected := []string{
-// 		"debug message 1",
-// 		"info message 1",
-// 		"debug message 3",
-// 		"info message 3",
-// 	}
-// 	notExpected := []string{
-// 		"debug message 2",
-// 		"info message 2",
-// 	}
+	// Verify expected messages
+	expected := []string{
+		"debug message 1",
+		"info message 1",
+		"debug message 3",
+		"info message 3",
+	}
+	notExpected := []string{
+		"debug message 2",
+		"info message 2",
+	}
 
-// 	for _, s := range expected {
-// 		if !strings.Contains(output, s) {
-// 			t.Errorf("Expected output to contain %q", s)
-// 		}
-// 	}
+	for _, s := range expected {
+		if !strings.Contains(output, s) {
+			t.Errorf("Expected output to contain %q", s)
+		}
+	}
 
-// 	for _, s := range notExpected {
-// 		if strings.Contains(output, s) {
-// 			t.Errorf("Expected output not to contain %q", s)
-// 		}
-// 	}
-// }
+	for _, s := range notExpected {
+		if strings.Contains(output, s) {
+			t.Errorf("Expected output not to contain %q", s)
+		}
+	}
+}
 
 // TestIntegrationFatalLogging tests the Fatal logging behavior
 // func TestIntegrationFatalLogging(t *testing.T) {
