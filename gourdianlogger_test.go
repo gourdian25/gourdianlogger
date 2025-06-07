@@ -705,7 +705,11 @@ func TestLogMethodsWithFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	fields := map[string]interface{}{
 		"user":    "testuser",
@@ -748,7 +752,11 @@ func TestLogFormatSwitching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Test plain format
 	logger.format = FormatPlain
@@ -811,7 +819,11 @@ func TestPrettyPrintJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	logger.Info("pretty message")
 	logger.Flush()
@@ -837,7 +849,11 @@ func TestDynamicLogLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Use atomic to safely track state between calls
 	var levelSwitch atomic.Bool
@@ -903,7 +919,11 @@ func TestConcurrentLogging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	messages := 1000
@@ -950,7 +970,11 @@ func TestFileRotationSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Write enough data to trigger rotation
 	for i := 0; i < 100; i++ {
@@ -990,7 +1014,11 @@ func TestRateLimiting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Log more messages than the rate limit
 	for i := 0; i < 20; i++ {
@@ -1073,7 +1101,11 @@ func TestNewDefaultGourdianLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDefaultGourdianLogger() failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Verify default values
 	if logger.backupCount != defaultBackupCount {
@@ -1123,7 +1155,11 @@ func TestFlush(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create logger: %v", err)
 		}
-		defer logger.Close()
+		defer func() {
+			if err := logger.Close(); err != nil {
+				log.Printf("Error closing logger: %v", err)
+			}
+		}()
 
 		// Fill the async queue
 		for i := 0; i < 5; i++ {
@@ -1158,7 +1194,11 @@ func TestWithFieldsMethods(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create logger: %v", err)
 		}
-		defer logger.Close()
+		defer func() {
+			if err := logger.Close(); err != nil {
+				log.Printf("Error closing logger: %v", err)
+			}
+		}()
 
 		fields := map[string]interface{}{
 			"user": "testuser",
@@ -1412,7 +1452,11 @@ func TestLogFormatFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		name     string
@@ -1482,7 +1526,11 @@ func TestFatalf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create logger: %v", err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	// Since Fatalf calls os.Exit, we need to test this in a subprocess
 	if os.Getenv("BE_FATAL") == "1" {
