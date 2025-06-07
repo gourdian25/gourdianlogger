@@ -2,8 +2,6 @@
 ├── LICENSE
 ├── Makefile
 ├── Readme.md
-├── coverage.html
-├── coverage.out
 ├── dist
 │   ├── CHANGELOG.md
 │   ├── artifacts.json
@@ -17,9 +15,21 @@
 ├── goReleaser.txt
 ├── gourdianlogger.go
 ├── gourdianlogger_benchmark_test.go
+├── gourdianlogger_integration_test.go
 ├── gourdianlogger_race_test.go
 ├── gourdianlogger_test.go
+├── prompt.txt
+├── test_coverage
+│   ├── benchmark_coverage.html
+│   ├── benchmark_coverage.out
+│   ├── coverage.html
+│   ├── coverage.out
+│   ├── integration_coverage.html
+│   ├── integration_coverage.out
+│   ├── unit_coverage.html
+│   └── unit_coverage.out
+├── tests.md
 ├── tree.txt
 └── version.go
 
-3 directories, 20 files
+4 directories, 29 files
