@@ -1,3 +1,5 @@
+# File: prompt.txt
+
 package gourdianlogger
 
 import (

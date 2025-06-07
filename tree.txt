@@ -4,6 +4,7 @@
 ├── Readme.md
 ├── coverage.html
 ├── coverage.out
+├── custom_logs_dir
 ├── dist
 │   ├── CHANGELOG.md
 │   ├── artifacts.json
@@ -16,10 +17,13 @@
 ├── go.sum
 ├── goReleaser.txt
 ├── gourdianlogger.go
-├── gourdianlogger_benchmark_test.go
-├── gourdianlogger_race_test.go
+├── gourdianlogger_benchmark_test.go.bak
+├── gourdianlogger_race_test.go.bak
 ├── gourdianlogger_test.go
+├── gourdianlogger_test.go.bak
+├── prompt.txt
+├── tests.md
 ├── tree.txt
 └── version.go
 
-3 directories, 20 files
+4 directories, 23 files

@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.8%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (68.4%)</option>
 				
 				</select>
 			</div>
@@ -69,9 +69,7 @@
 		</div>
 		<div id="content">
 		
-		<pre class="file" id="file0" style="display: none">// File: gourdianlogger.go
-
-package gourdianlogger
+		<pre class="file" id="file0" style="display: none">package gourdianlogger
 
 import (
         "bytes"
@@ -379,7 +377,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                                 batch = batch[:0]
                         }</span>
                 case &lt;-ticker.C:<span class="cov8" title="1">
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                                 batch = batch[:0]
                         }</span>
