@@ -332,6 +332,23 @@ func (l *Logger) asyncWorker() {
 	}
 }
 
+func (l *Logger) writeFallback(message string, args ...interface{}) {
+	if l.fallbackWriter == nil {
+		return
+	}
+
+	var err error
+	if len(args) > 0 {
+		_, err = fmt.Fprintf(l.fallbackWriter, message, args...)
+	} else {
+		_, err = fmt.Fprint(l.fallbackWriter, message)
+	}
+
+	if err != nil && l.errorHandler != nil {
+		l.errorHandler(fmt.Errorf("fallback write error: %w", err))
+	}
+}
+
 func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
 
 	if l.paused.Load() {
@@ -348,7 +365,7 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) {
 		if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
 			l.handleError(fmt.Errorf("log write error: %w", err))
 			if l.fallbackWriter != nil {
-				fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
+				l.writeFallback("FALLBACK LOG: %s", buf.String())
 			}
 		}
 		l.bufferPool.Put(buf)
@@ -368,7 +385,7 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) {
 	if _, err := l.multiWriter.Write(buf.Bytes()); err != nil {
 		l.handleError(fmt.Errorf("log write error: %w", err))
 		if l.fallbackWriter != nil {
-			fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
+			l.writeFallback("FALLBACK LOG: %s", buf.String())
 		}
 	}
 	l.bufferPool.Put(buf)
@@ -378,7 +395,7 @@ func (l *Logger) handleError(err error) {
 	if l.errorHandler != nil {
 		l.errorHandler(err)
 	} else if l.fallbackWriter != nil {
-		fmt.Fprintf(l.fallbackWriter, "LOGGER ERROR: %v\n", err)
+		l.writeFallback("LOGGER ERROR: %v\n", err)
 	}
 }
 
@@ -495,10 +512,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		return
 	}
 
-	if l.closed.Load() {
-		return
-	}
-
 	// Check rate limiting before doing any work
 	if l.rateLimiter != nil {
 		if !l.rateLimiter.Allow() {
@@ -531,6 +544,11 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		formatted = l.formatPlain(level, message, callerInfo, fields)
 	}
 
+	if l.closed.Load() {
+		l.writeFallback("Logger closed. Message: %s", formatted)
+		return
+	}
+
 	if l.asyncQueue != nil {
 		buf := l.bufferPool.Get().(*bytes.Buffer)
 		buf.Reset()
@@ -545,14 +563,12 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 		l.fileMu.Lock()
 		defer l.fileMu.Unlock()
 		if l.closed.Load() {
-			fmt.Fprintf(os.Stderr, "Logger closed. Message: %s", formatted)
+			l.writeFallback("Logger closed. Message: %s", formatted)
 			return
 		}
 		if _, err := l.multiWriter.Write([]byte(formatted)); err != nil {
 			l.handleError(fmt.Errorf("log write error: %w", err))
-			if l.fallbackWriter != nil {
-				fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", formatted)
-			}
+			l.writeFallback("FALLBACK LOG: %s", formatted)
 		}
 	}
 
