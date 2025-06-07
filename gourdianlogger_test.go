@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,9 +19,6 @@ import (
 
 // failingWriter is an io.Writer that always fails
 type failingWriter struct{}
-
-// runtimeCaller is a variable for testing runtime.Caller behavior
-var runtimeCaller = runtime.Caller
 
 func (w *failingWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("simulated write error")

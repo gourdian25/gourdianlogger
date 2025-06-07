@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (67.8%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (90.2%)</option>
 				
 				</select>
 			</div>
@@ -279,7 +279,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
                 logger.fallbackWriter = os.Stderr
         }</span>
 
-        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.MaxLogRate &gt; 0 </span><span class="cov8" title="1">{
                 logger.rateLimiter = rate.NewLimiter(rate.Limit(config.MaxLogRate), config.MaxLogRate)
         }</span>
 
@@ -301,7 +301,7 @@ func NewGourdianLogger(config LoggerConfig) (*Logger, error) <span class="cov8" 
         <span class="cov8" title="1">return logger, nil</span>
 }
 
-func NewDefaultGourdianLogger() (*Logger, error) <span class="cov0" title="0">{
+func NewDefaultGourdianLogger() (*Logger, error) <span class="cov8" title="1">{
         config := LoggerConfig{
                 Filename:        defaultFileName,
                 MaxBytes:        defaultMaxBytes,
@@ -350,14 +350,14 @@ func (l *Logger) fileSizeRotationWorker() <span class="cov8" title="1">{
         defer l.wg.Done()
         for </span><span class="cov8" title="1">{
                 select </span>{
-                case &lt;-l.rotateChan:<span class="cov0" title="0">
+                case &lt;-l.rotateChan:<span class="cov8" title="1">
                         l.fileMu.Lock()
-                        if l.file != nil </span><span class="cov0" title="0">{
+                        if l.file != nil </span><span class="cov8" title="1">{
                                 if err := l.rotateLogFiles(); err != nil </span><span class="cov0" title="0">{
                                         l.handleError(fmt.Errorf("log rotation failed: %w", err))
                                 }</span>
                         }
-                        <span class="cov0" title="0">l.fileMu.Unlock()</span>
+                        <span class="cov8" title="1">l.fileMu.Unlock()</span>
                 case &lt;-l.rotateCloseChan:<span class="cov8" title="1">
                         return</span>
                 }
@@ -379,7 +379,7 @@ func (l *Logger) asyncWorker() <span class="cov8" title="1">{
                                 batch = batch[:0]
                         }</span>
                 case &lt;-ticker.C:<span class="cov8" title="1">
-                        if len(batch) &gt; 0 </span><span class="cov0" title="0">{
+                        if len(batch) &gt; 0 </span><span class="cov8" title="1">{
                                 l.writeBatch(batch)
                                 batch = batch[:0]
                         }</span>
@@ -406,9 +406,9 @@ func (l *Logger) writeBatch(buffers []*bytes.Buffer) <span class="cov8" title="1
         defer l.fileMu.Unlock()
 
         for _, buf := range buffers </span><span class="cov8" title="1">{
-                if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+                if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov8" title="1">{
                         l.handleError(fmt.Errorf("log write error: %w", err))
-                        if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+                        if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                                 fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                         }</span>
                 }
@@ -420,9 +420,9 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
         l.fileMu.Lock()
         defer l.fileMu.Unlock()
 
-        if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov0" title="0">{
+        if _, err := l.multiWriter.Write(buf.Bytes()); err != nil </span><span class="cov8" title="1">{
                 l.handleError(fmt.Errorf("log write error: %w", err))
-                if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+                if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                         fmt.Fprintf(l.fallbackWriter, "FALLBACK LOG: %s", buf.String())
                 }</span>
         }
@@ -432,7 +432,7 @@ func (l *Logger) writeBuffer(buf *bytes.Buffer) <span class="cov8" title="1">{
 func (l *Logger) handleError(err error) <span class="cov8" title="1">{
         if l.errorHandler != nil </span><span class="cov8" title="1">{
                 l.errorHandler(err)
-        }</span> else<span class="cov0" title="0"> if l.fallbackWriter != nil </span><span class="cov0" title="0">{
+        }</span> else<span class="cov8" title="1"> if l.fallbackWriter != nil </span><span class="cov8" title="1">{
                 fmt.Fprintf(l.fallbackWriter, "LOGGER ERROR: %v\n", err)
         }</span>
 }
@@ -507,35 +507,32 @@ func (l *Logger) formatJSON(level LogLevel, message, callerInfo string, fields m
         <span class="cov8" title="1">return string(jsonData) + "\n"</span>
 }
 
-func (l *Logger) getCallerInfo() string <span class="cov0" title="0">{
-        if !l.enableCaller </span><span class="cov0" title="0">{
+func (l *Logger) getCallerInfo() string <span class="cov8" title="1">{
+        if !l.enableCaller </span><span class="cov8" title="1">{
                 return ""
         }</span>
 
-        <span class="cov0" title="0">pc, file, line, ok := runtime.Caller(3) // Adjusted depth for logger methods
+        <span class="cov8" title="1">pc, file, line, ok := runtime.Caller(3) // Adjusted depth for logger methods
         if !ok </span><span class="cov0" title="0">{
                 return ""
         }</span>
 
-        <span class="cov0" title="0">fn := runtime.FuncForPC(pc)
+        // Get function name
+        <span class="cov8" title="1">fn := runtime.FuncForPC(pc)
         if fn == nil </span><span class="cov0" title="0">{
                 return fmt.Sprintf("%s:%d", filepath.Base(file), line)
         }</span>
 
-        // Get the full function name
-        <span class="cov0" title="0">fullFnName := fn.Name()
-
-        // Extract just the last part of the package path and function name
-        lastSlash := strings.LastIndex(fullFnName, "/")
-        if lastSlash &lt; 0 </span><span class="cov0" title="0">{
-                lastSlash = 0
+        // Extract just the function name without package path
+        <span class="cov8" title="1">fnName := fn.Name()
+        if lastSlash := strings.LastIndex(fnName, "/"); lastSlash &gt;= 0 </span><span class="cov0" title="0">{
+                fnName = fnName[lastSlash+1:]
         }</span>
-        <span class="cov0" title="0">lastDot := strings.LastIndex(fullFnName[lastSlash:], ".")
-        if lastDot &lt; 0 </span><span class="cov0" title="0">{
-                return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash:])
+        <span class="cov8" title="1">if lastDot := strings.LastIndex(fnName, "."); lastDot &gt;= 0 </span><span class="cov8" title="1">{
+                fnName = fnName[lastDot+1:]
         }</span>
 
-        <span class="cov0" title="0">return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fullFnName[lastSlash+lastDot+1:])</span>
+        <span class="cov8" title="1">return fmt.Sprintf("%s:%d:%s", filepath.Base(file), line, fnName)</span>
 }
 
 func (l *Logger) log(level LogLevel, message string, fields map[string]interface{}) <span class="cov8" title="1">{
@@ -547,7 +544,14 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 return
         }</span>
 
-        // Get the current level - check dynamic function first if set
+        // Check rate limiting before doing any work
+        <span class="cov8" title="1">if l.rateLimiter != nil </span><span class="cov8" title="1">{
+                if !l.rateLimiter.Allow() </span><span class="cov8" title="1">{
+                        return // Silently drop the message if rate limited
+                }</span>
+        }
+
+        // Rest of the existing log method...
         <span class="cov8" title="1">var currentLevel LogLevel
         if l.dynamicLevelFn != nil </span><span class="cov8" title="1">{
                 currentLevel = l.dynamicLevelFn()
@@ -555,7 +559,6 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
                 currentLevel = LogLevel(l.level.Load())
         }</span>
 
-        // Check if the message level is below the current level
         <span class="cov8" title="1">if level &lt; currentLevel </span><span class="cov8" title="1">{
                 return
         }</span>
@@ -604,28 +607,28 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
         }</span>
 }
 
-func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
+func (l *Logger) rotateLogFiles() error <span class="cov8" title="1">{
         if l.file == nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("log file not open")
         }</span>
 
-        <span class="cov0" title="0">fileInfo, err := l.file.Stat()
+        <span class="cov8" title="1">fileInfo, err := l.file.Stat()
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to get file info: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if fileInfo.Size() &lt; l.maxBytes </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if fileInfo.Size() &lt; l.maxBytes </span><span class="cov0" title="0">{
                 return nil
         }</span>
 
         // Close current file
-        <span class="cov0" title="0">oldFile := l.file
+        <span class="cov8" title="1">oldFile := l.file
         if err := oldFile.Close(); err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to close log file: %w", err)
         }</span>
 
         // Create new filename with timestamp
-        <span class="cov0" title="0">base := strings.TrimSuffix(l.baseFilename, ".log")
+        <span class="cov8" title="1">base := strings.TrimSuffix(l.baseFilename, ".log")
         timestamp := time.Now().Format("20060102_150405")
         backupPath := fmt.Sprintf("%s_%s.log", base, timestamp)
 
@@ -641,21 +644,21 @@ func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
         }
 
         // Create new log file
-        <span class="cov0" title="0">file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+        <span class="cov8" title="1">file, err := os.OpenFile(l.baseFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to create new log file: %w", err)
         }</span>
 
         // Update logger state
-        <span class="cov0" title="0">l.file = file
+        <span class="cov8" title="1">l.file = file
 
         // Update multiWriter with new file
         l.outputsMu.Lock()
         outputs := []io.Writer{file}
-        if len(l.outputs) &gt; 1 </span><span class="cov0" title="0">{ // Keep other outputs
+        if len(l.outputs) &gt; 1 </span><span class="cov8" title="1">{ // Keep other outputs
                 outputs = append(outputs, l.outputs[1:]...)
         }</span>
-        <span class="cov0" title="0">l.outputs = outputs
+        <span class="cov8" title="1">l.outputs = outputs
         l.multiWriter = io.MultiWriter(outputs...)
         l.outputsMu.Unlock()
 
@@ -664,37 +667,47 @@ func (l *Logger) rotateLogFiles() error <span class="cov0" title="0">{
         return nil</span>
 }
 
-func (l *Logger) cleanupOldBackups() <span class="cov0" title="0">{
+func (l *Logger) cleanupOldBackups() <span class="cov8" title="1">{
         pattern := strings.TrimSuffix(l.baseFilename, ".log") + "_*.log"
         files, err := filepath.Glob(pattern)
-        if err != nil || len(files) &lt;= l.backupCount </span><span class="cov0" title="0">{
+        if err != nil || len(files) &lt;= l.backupCount </span><span class="cov8" title="1">{
                 return
         }</span>
 
-        <span class="cov0" title="0">sort.Slice(files, func(i, j int) bool </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">sort.Slice(files, func(i, j int) bool </span><span class="cov8" title="1">{
                 info1, _ := os.Stat(files[i])
                 info2, _ := os.Stat(files[j])
                 return info1.ModTime().Before(info2.ModTime())
         }</span>)
 
-        <span class="cov0" title="0">for _, f := range files[:len(files)-l.backupCount] </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">for _, f := range files[:len(files)-l.backupCount] </span><span class="cov8" title="1">{
                 _ = os.Remove(f)
         }</span>
 }
 
 func (l *Logger) Flush() <span class="cov8" title="1">{
-        if l.asyncQueue != nil </span><span class="cov0" title="0">{
-                for len(l.asyncQueue) &gt; 0 </span><span class="cov0" title="0">{
+        if l.asyncQueue != nil </span><span class="cov8" title="1">{
+                // Wait for the queue to be empty
+                for len(l.asyncQueue) &gt; 0 </span><span class="cov8" title="1">{
                         time.Sleep(10 * time.Millisecond)
                 }</span>
+
+                // Give async workers a moment to process any in-flight messages
+                <span class="cov8" title="1">time.Sleep(100 * time.Millisecond)</span>
         }
+
+        // If there are any async workers, wait for them to finish current work
+        <span class="cov8" title="1">if l.asyncWorkers &gt; 0 </span><span class="cov8" title="1">{
+                // This gives time for any batch writes to complete
+                time.Sleep(100 * time.Millisecond)
+        }</span>
 }
 
-func (l *Logger) SetLogLevel(level LogLevel) <span class="cov0" title="0">{
+func (l *Logger) SetLogLevel(level LogLevel) <span class="cov8" title="1">{
         l.level.Store(int32(level))
 }</span>
 
-func (l *Logger) GetLogLevel() LogLevel <span class="cov0" title="0">{
+func (l *Logger) GetLogLevel() LogLevel <span class="cov8" title="1">{
         return LogLevel(l.level.Load())
 }</span>
 
@@ -807,23 +820,23 @@ func (l *Logger) Fatal(v ...interface{}) <span class="cov8" title="1">{
         // os.Exit(1)
 }</span>
 
-func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Debugf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Infof(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Infof(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Warnf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Errorf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprintf(format, v...), nil)
 }</span>
 
-func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) Fatalf(format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(FATAL, fmt.Sprintf(format, v...), nil)
         // l.Flush()
         // os.Exit(1)
@@ -847,30 +860,30 @@ func (l *Logger) ErrorWithFields(fields map[string]interface{}, v ...interface{}
 
 func (l *Logger) FatalWithFields(fields map[string]interface{}, v ...interface{}) <span class="cov0" title="0">{
         l.log(FATAL, fmt.Sprint(v...), fields)
-        // l.Flush()
-        // os.Exit(1)
+        l.Flush()
+        os.Exit(1)
 }</span>
 
-func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) DebugfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(DEBUG, fmt.Sprintf(format, v...), fields)
 }</span>
 
-func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) InfofWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(INFO, fmt.Sprintf(format, v...), fields)
 }</span>
 
-func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) WarnfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(WARN, fmt.Sprintf(format, v...), fields)
 }</span>
 
-func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
+func (l *Logger) ErrorfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov8" title="1">{
         l.log(ERROR, fmt.Sprintf(format, v...), fields)
 }</span>
 
 func (l *Logger) FatalfWithFields(fields map[string]interface{}, format string, v ...interface{}) <span class="cov0" title="0">{
         l.log(FATAL, fmt.Sprintf(format, v...), fields)
-        // l.Flush()
-        // os.Exit(1)
+        l.Flush()
+        os.Exit(1)
 }</span>
 </pre>
 		

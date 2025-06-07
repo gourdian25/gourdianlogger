@@ -2,3 +2,5 @@ logs/
 
 *.logs
 *.log
+
+tt_backups/
