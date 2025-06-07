@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,24 @@ type failingWriter struct{}
 
 func (w *failingWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("simulated write error")
+}
+
+// syncBuffer wraps bytes.Buffer with thread-safe access
+type syncBuffer struct {
+	buf *bytes.Buffer
+	mu  *sync.Mutex
+}
+
+func (s *syncBuffer) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }
 
 // TestLogLevelString tests the String() method of LogLevel
@@ -845,51 +864,53 @@ func TestDynamicLogLevel(t *testing.T) {
 }
 
 // this sometimes failing and needs improvement
-// func TestConcurrentLogging(t *testing.T) {
-// 	tempDir := t.TempDir()
-// 	buf := &bytes.Buffer{}
+func TestConcurrentLogging(t *testing.T) {
+	tempDir := t.TempDir()
+	buf := &syncBuffer{buf: &bytes.Buffer{}, mu: &sync.Mutex{}}
 
-// 	config := LoggerConfig{
-// 		LogsDir:      tempDir,
-// 		Outputs:      []io.Writer{buf},
-// 		BufferSize:   1000,
-// 		AsyncWorkers: 5,
-// 	}
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Outputs:      []io.Writer{buf},
+		BufferSize:   1000,
+		AsyncWorkers: 5,
+	}
 
-// 	logger, err := NewGourdianLogger(config)
-// 	if err != nil {
-// 		t.Fatalf("Failed to create logger: %v", err)
-// 	}
-// 	defer logger.Close()
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	defer logger.Close()
 
-// 	var wg sync.WaitGroup
-// 	messages := 1000
+	var wg sync.WaitGroup
+	messages := 1000
 
-// 	// Concurrent logging from multiple goroutines
-// 	for i := 0; i < messages; i++ {
-// 		wg.Add(1)
-// 		go func(num int) {
-// 			defer wg.Done()
-// 			logger.Info(fmt.Sprintf("concurrent message %d", num))
-// 		}(i)
-// 	}
+	// Concurrent logging from multiple goroutines
+	for i := 0; i < messages; i++ {
+		wg.Add(1)
+		go func(num int) {
+			defer wg.Done()
+			logger.Info(fmt.Sprintf("concurrent message %d", num))
+		}(i)
+	}
 
-// 	wg.Wait()
-// 	logger.Flush()
+	wg.Wait()
 
-// 	// Verify all messages were logged
-// 	output := buf.String()
-// 	missing := 0
-// 	for i := 0; i < messages; i++ {
-// 		if !strings.Contains(output, fmt.Sprintf("concurrent message %d", i)) {
-// 			missing++
-// 		}
-// 	}
+	// Give extra time for async workers to complete
+	time.Sleep(100 * time.Millisecond)
 
-// 	if missing > 0 {
-// 		t.Errorf("Missing %d concurrent messages in output", missing)
-// 	}
-// }
+	// Verify all messages were logged
+	output := buf.String()
+	missing := 0
+	for i := 0; i < messages; i++ {
+		if !strings.Contains(output, fmt.Sprintf("concurrent message %d", i)) {
+			missing++
+		}
+	}
+
+	if missing > 0 {
+		t.Errorf("Missing %d concurrent messages in output", missing)
+	}
+}
 
 // func TestCallerInfo(t *testing.T) {
 // 	tempDir := t.TempDir()
