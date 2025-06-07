@@ -1,8 +1,12 @@
+// File: gourdianlogger_benchmark_test.go
+
 package gourdianlogger
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -10,675 +14,580 @@ import (
 	"time"
 )
 
-// BenchmarkLogging benchmarks basic synchronous logging
-func BenchmarkLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
+// BenchmarkDirectLogging benchmarks synchronous logging without buffering
+func BenchmarkDirectLogging(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_direct",
+		BufferSize:   0, // No buffering
+		AsyncWorkers: 0,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark log message")
-	}
-}
-
-// BenchmarkLoggingWithCaller benchmarks logging with caller info
-func BenchmarkLoggingWithCaller(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.EnableCaller = true
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark log message with caller")
-	}
-}
-
-// BenchmarkLoggingJSON benchmarks JSON formatted logging
-func BenchmarkLoggingJSON(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.Format = FormatJSON
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark json log message")
-	}
-}
-
-// BenchmarkLoggingJSONPretty benchmarks pretty-printed JSON logging
-func BenchmarkLoggingJSONPretty(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.Format = FormatJSON
-	config.FormatConfig.PrettyPrint = true
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark pretty json log message")
-	}
-}
-
-// BenchmarkLoggingWithCustomFields benchmarks logging with custom fields
-func BenchmarkLoggingWithCustomFields(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.FormatConfig.CustomFields = map[string]interface{}{
-		"app":     "benchmark",
-		"version": "1.0.0",
-	}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("benchmark log with custom fields")
-	}
-}
-
-// BenchmarkAsyncLogging benchmarks async logging with buffer
-func BenchmarkAsyncLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("async benchmark log message")
+		logger.Info("Benchmark log message")
 	}
 	b.StopTimer()
-	logger.Flush()
 }
 
-// BenchmarkAsyncLoggingHighContention benchmarks async logging under high contention
-func BenchmarkAsyncLoggingHighContention(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.BufferSize = 100
-	config.AsyncWorkers = 2 // Fewer workers to increase contention
+// BenchmarkBufferedLogging benchmarks async logging with buffer
+func BenchmarkBufferedLogging(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_buffered",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("high contention async log message")
+		logger.Info("Benchmark log message")
 	}
 	b.StopTimer()
-	logger.Flush()
 }
 
-// BenchmarkConcurrentLogging benchmarks concurrent log writes
+// BenchmarkConcurrentLogging benchmarks concurrent logging
 func BenchmarkConcurrentLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_concurrent",
+		BufferSize:   10000,
+		AsyncWorkers: 8,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			logger.Info("concurrent benchmark log message")
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
-	})
-	b.StopTimer()
-	logger.Flush()
-}
-
-// BenchmarkLogRotation benchmarks log rotation performance
-func BenchmarkLogRotation(b *testing.B) {
-	dir := "bench_rotate"
-	os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
-
-	config := DefaultConfig()
-	config.LogsDir = dir
-	config.MaxBytes = 100 // Small size to force frequent rotation
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info(strings.Repeat("a", 50)) // Ensure rotation happens
-	}
-}
-
-// BenchmarkMultiOutput benchmarks logging to multiple outputs
-func BenchmarkMultiOutput(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard, io.Discard, io.Discard} // Multiple discard writers
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("multi-output benchmark log message")
-	}
-}
-
-// BenchmarkFormattedLogging benchmarks formatted logging methods
-func BenchmarkFormattedLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	tests := []struct {
-		name string
-		fn   func(string, ...interface{})
-	}{
-		{"Debugf", logger.Debugf},
-		{"Infof", logger.Infof},
-		{"Warnf", logger.Warnf},
-		{"Errorf", logger.Errorf},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				tt.fn("formatted log %d", i)
-			}
-		})
-	}
-}
-
-// BenchmarkLogLevelFiltering benchmarks the impact of log level filtering
-func BenchmarkLogLevelFiltering(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	tests := []struct {
-		name  string
-		level LogLevel
-	}{
-		{"DebugLevel", DEBUG},
-		{"InfoLevel", INFO},
-		{"WarnLevel", WARN},
-		{"ErrorLevel", ERROR},
-	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			logger.SetLogLevel(tt.level)
-			for i := 0; i < b.N; i++ {
-				logger.Debug("debug message")
-				logger.Info("info message")
-				logger.Warn("warn message")
-				logger.Error("error message")
-			}
-		})
-	}
-}
-
-// BenchmarkHeavyLogContent benchmarks logging with large messages
-func BenchmarkHeavyLogContent(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	largeMessage := strings.Repeat("This is a large log message. ", 100) // ~3KB
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info(largeMessage)
-	}
-}
-
-// BenchmarkLoggerCreation benchmarks logger initialization
-func BenchmarkLoggerCreation(b *testing.B) {
-	dir := "bench_create"
-	os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		config := DefaultConfig()
-		config.LogsDir = dir
-		logger, err := NewGourdianLogger(config)
-		if err != nil {
-			b.Fatal(err)
-		}
-		logger.Close()
-	}
-}
-
-// BenchmarkWithConfig benchmarks JSON config parsing and logger creation
-func BenchmarkWithConfig(b *testing.B) {
-	dir := "bench_config"
-	os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
-
-	jsonConfig := `{
-		"filename": "config_test",
-		"logs_dir": "` + dir + `",
-		"log_level": "WARN",
-		"format": "JSON",
-		"format_config": {
-			"pretty_print": true,
-			"custom_fields": {
-				"app": "benchmark"
-			}
-		}
-	}`
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger, err := WithConfig(jsonConfig)
-		if err != nil {
-			b.Fatal(err)
-		}
-		logger.Close()
-	}
-}
-
-// BenchmarkLoggingWithManyOutputs benchmarks logging with many outputs
-func BenchmarkLoggingWithManyOutputs(b *testing.B) {
-	// Create 10 discard writers
-	outputs := make([]io.Writer, 10)
-	for i := range outputs {
-		outputs[i] = io.Discard
-	}
-
-	config := DefaultConfig()
-	config.Outputs = outputs
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("log message with many outputs")
-	}
-}
-
-// BenchmarkLoggingUnderContention benchmarks logging under lock contention
-func BenchmarkLoggingUnderContention(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
+	}()
 
 	var wg sync.WaitGroup
-	workers := 10
-	iterations := b.N / workers
-	if iterations == 0 {
-		iterations = 1
-	}
+	workers := 16
+	perWorker := b.N / workers
 
 	b.ResetTimer()
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
-				logger.Info("contention test message")
+			for i := 0; i < perWorker; i++ {
+				logger.Info("Concurrent benchmark log message")
 			}
 		}()
 	}
 	wg.Wait()
+	b.StopTimer()
 }
 
-func BenchmarkDifferentLogLevels(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
+// BenchmarkJSONFormat benchmarks JSON formatted logging
+func BenchmarkJSONFormat(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_json",
+		LogFormat:    FormatJSON,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
-	tests := []struct {
-		name string
-		fn   func(string)
-	}{
-		{"Debug", func(s string) { logger.Debug(s) }},
-		{"Info", func(s string) { logger.Info(s) }},
-		{"Warn", func(s string) { logger.Warn(s) }},
-		{"Error", func(s string) { logger.Error(s) }},
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark JSON log message")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkWithFields benchmarks logging with additional fields
+func BenchmarkWithFields(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_fields",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	fields := map[string]interface{}{
+		"user_id":    12345,
+		"ip_address": "192.168.1.1",
+		"request_id": "abc123",
+		"timestamp":  time.Now(),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.InfoWithFields(fields, "Benchmark log with fields")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkRateLimited benchmarks logging with rate limiting
+func BenchmarkRateLimited(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_ratelimited",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		MaxLogRate:   10000, // 10,000 logs per second
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark rate limited log message")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkFileRotation benchmarks logging with file rotation
+func BenchmarkFileRotation(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_rotation",
+		MaxBytes:     1024, // Small size to force rotation
+		BackupCount:  5,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark log message that will trigger rotation")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkCallerInfo benchmarks logging with caller info enabled
+func BenchmarkCallerInfo(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_caller",
+		EnableCaller: true,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark log with caller info")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkPlainTextFormat benchmarks plain text formatted logging
+func BenchmarkPlainTextFormat(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_plain",
+		LogFormat:    FormatPlain,
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark plain text log message")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkMultiOutput benchmarks logging to multiple outputs
+func BenchmarkMultiOutput(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	buf1 := &bytes.Buffer{}
+	buf2 := &bytes.Buffer{}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_multioutput",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+		Outputs:      []io.Writer{buf1, buf2},
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark multi-output log message")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkLogLevelFilter benchmarks the overhead of log level filtering
+func BenchmarkLogLevelFilter(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_loglevel",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     ERROR, // Only ERROR and above
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// These should all be filtered out
+		logger.Debug("Debug message that should be filtered")
+		logger.Info("Info message that should be filtered")
+		logger.Warn("Warn message that should be filtered")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkDynamicLogLevel benchmarks dynamic log level changes
+func BenchmarkDynamicLogLevel(b *testing.B) {
+	tempDir, err := os.MkdirTemp("", "logger_bench")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_dynamic",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	// Set up dynamic level function
+	counter := 0
+	levelFn := func() LogLevel {
+		counter++
+		if counter%2 == 0 {
+			return DEBUG
+		}
+		return INFO
+	}
+	logger.SetDynamicLevelFunc(levelFn)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark dynamic log level message")
+	}
+	b.StopTimer()
+}
+
+// BenchmarkPlainTextFormatSmallMessage benchmarks plain text logging with small messages
+func BenchmarkPlainTextFormatSmallMessage(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:   tempDir,
+		Filename:  "bench_small",
+		LogFormat: FormatPlain,
+		LogLevel:  DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	message := "This is a small log message"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info(message)
+	}
+}
+
+// BenchmarkJSONFormatSmallMessage benchmarks JSON logging with small messages
+func BenchmarkJSONFormatSmallMessage(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:   tempDir,
+		Filename:  "bench_json_small",
+		LogFormat: FormatJSON,
+		LogLevel:  DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	message := "This is a small JSON log message"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info(message)
+	}
+}
+
+// BenchmarkLoggingWithVaryingMessageSizes benchmarks with different message sizes
+func BenchmarkLoggingWithVaryingMessageSizes(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_sizes",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	sizes := []struct {
+		name    string
+		message string
+	}{
+		{"Small", "small message"},
+		{"Medium", strings.Repeat("medium message ", 20)},
+		{"Large", strings.Repeat("large message ", 100)},
+		{"VeryLarge", strings.Repeat("very large message ", 500)},
+	}
+
+	for _, size := range sizes {
+		b.Run(size.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				tt.fn("log message")
+				logger.Info(size.message)
 			}
 		})
 	}
 }
 
-// BenchmarkStructuredLogging benchmarks structured logging with fields
-func BenchmarkStructuredLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
+// BenchmarkLoggingWithManyFields benchmarks logging with many fields
+func BenchmarkLoggingWithManyFields(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_many_fields",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
-
-	fields := map[string]interface{}{
-		"user_id":    12345,
-		"action":     "login",
-		"ip_address": "192.168.1.1",
-		"success":    true,
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.InfoWithFields(fields, "user login")
-	}
-}
-
-// BenchmarkConcurrentStructuredLogging benchmarks concurrent structured logging
-func BenchmarkConcurrentStructuredLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	fields := map[string]interface{}{
-		"transaction_id": "tx-12345",
-		"amount":         100.50,
-		"currency":       "USD",
-	}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			logger.InfoWithFields(fields, "transaction processed")
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
-	})
-	b.StopTimer()
-	logger.Flush()
-}
+	}()
 
-// BenchmarkLogLevelChange benchmarks the performance impact of changing log levels
-func BenchmarkLogLevelChange(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Change log level every 100 iterations
-		if i%100 == 0 {
-			logger.SetLogLevel(LogLevel(i % 5))
-		}
-		logger.Info("message with changing log levels")
-	}
-}
-
-// BenchmarkDynamicLogLevel benchmarks dynamic log level function performance
-func BenchmarkDynamicLogLevel(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	counter := 0
-	logger.SetDynamicLevelFunc(func() LogLevel {
-		counter++
-		return LogLevel(counter % 5)
-	})
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("message with dynamic level")
-	}
-}
-
-// BenchmarkRateLimitedLogging benchmarks logging with rate limiting
-func BenchmarkRateLimitedLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.MaxLogRate = 10000 // 10,000 logs per second
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("rate limited message")
-	}
-}
-
-// BenchmarkSampledLogging benchmarks logging with sampling
-func BenchmarkSampledLogging(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.SampleRate = 10 // Log 1 in 10 messages
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("sampled log message")
-	}
-}
-
-// BenchmarkLogRotationWithCompression benchmarks rotation with compression
-func BenchmarkLogRotationWithCompression(b *testing.B) {
-	dir := "bench_rotate_compress"
-	os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
-
-	config := DefaultConfig()
-	config.LogsDir = dir
-	config.MaxBytes = 100 // Small size to force frequent rotation
-	config.CompressBackups = true
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info(strings.Repeat("a", 50)) // Ensure rotation happens
-	}
-}
-
-// BenchmarkOutputModification benchmarks adding/removing outputs
-func BenchmarkOutputModification(b *testing.B) {
-	config := DefaultConfig()
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	newOutput := io.Discard
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.AddOutput(newOutput)
-		logger.RemoveOutput(newOutput)
-	}
-}
-
-// BenchmarkErrorHandling benchmarks error handling path
-func BenchmarkErrorHandling(b *testing.B) {
-	// Create a faulty writer that will fail every write
-	faultyWriter := &faultyWriter{failEvery: 1}
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{faultyWriter}
-	config.EnableFallback = true
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.Info("message that will trigger error handling")
-	}
-}
-
-// BenchmarkLoggerWithManyFields benchmarks logging with many fields
-func BenchmarkLoggerWithManyFields(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	// Create a map with many fields
-	manyFields := make(map[string]interface{})
+	fields := make(map[string]interface{})
 	for i := 0; i < 50; i++ {
-		manyFields[fmt.Sprintf("field_%d", i)] = fmt.Sprintf("value_%d", i)
+		fields[fmt.Sprintf("field_%d", i)] = fmt.Sprintf("value_%d", i)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.InfoWithFields(manyFields, "message with many fields")
-	}
-}
-
-// BenchmarkConcurrentConfigChanges benchmarks concurrent config changes
-func BenchmarkConcurrentConfigChanges(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	var wg sync.WaitGroup
-	workers := 10
-	iterations := b.N / workers
-	if iterations == 0 {
-		iterations = 1
-	}
-
-	b.ResetTimer()
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for i := 0; i < iterations; i++ {
-				// Alternate between logging and config changes
-				if i%2 == 0 {
-					logger.Infof("message from worker %d", id)
-				} else {
-					logger.SetLogLevel(LogLevel((i + id) % 5))
-				}
-			}
-		}(w)
-	}
-	wg.Wait()
-}
-
-// BenchmarkLoggingWithLargeFields benchmarks logging with large field values
-func BenchmarkLoggingWithLargeFields(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
-
-	largeValue := strings.Repeat("large-field-value-", 100) // ~2KB value
-
-	fields := map[string]interface{}{
-		"normal_field": "normal",
-		"large_field":  largeValue,
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		logger.InfoWithFields(fields, "message with large field values")
+		logger.InfoWithFields(fields, "message with many fields")
 	}
 }
 
 // BenchmarkLoggingWithComplexFields benchmarks logging with complex field types
 func BenchmarkLoggingWithComplexFields(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_complex_fields",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
 	type User struct {
 		ID       int
@@ -707,86 +616,200 @@ func BenchmarkLoggingWithComplexFields(b *testing.B) {
 	}
 }
 
-// BenchmarkLoggingWithCustomErrorHandler benchmarks logging with custom error handler
-func BenchmarkLoggingWithCustomErrorHandler(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{&faultyWriter{failEvery: 2}} // Fails every other write
-	config.ErrorHandler = func(err error) {
-		// Custom error handler
-	}
-	logger, err := NewGourdianLogger(config)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer logger.Close()
+// BenchmarkLoggerCreation benchmarks logger initialization time
+func BenchmarkLoggerCreation(b *testing.B) {
+	tempDir := b.TempDir()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.Info("message that may trigger error handler")
+		config := LoggerConfig{
+			LogsDir:  tempDir,
+			Filename: fmt.Sprintf("bench_create_%d", i),
+			LogLevel: DEBUG,
+		}
+		logger, err := NewGourdianLogger(config)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
 	}
 }
 
-// BenchmarkTimeBasedRotation benchmarks time-based rotation
-func BenchmarkTimeBasedRotation(b *testing.B) {
-	dir := "bench_time_rotate"
-	os.RemoveAll(dir)
-	defer os.RemoveAll(dir)
-
-	config := DefaultConfig()
-	config.LogsDir = dir
-	config.RotationTime = time.Millisecond * 10 // Very frequent rotation
+// BenchmarkLoggerWithCustomErrorHandler benchmarks logging with custom error handler
+func BenchmarkLoggerWithCustomErrorHandler(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_error_handler",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+		ErrorHandler: func(err error) {
+			// Do nothing, just measure the overhead
+		},
+	}
 
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer func() {
-		// Ensure we don't deadlock on close
-		done := make(chan struct{})
-		go func() {
-			logger.Close()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			b.Log("Warning: logger close timed out")
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
 	}()
 
-	// Run fewer iterations if needed by adjusting the loop
-	maxIterations := 1000
-	if b.N > maxIterations {
-		// Keep original b.N but only run up to maxIterations
-		iterations := maxIterations
-		b.ResetTimer()
-		for i := 0; i < iterations; i++ {
-			logger.Info("time-based rotation message")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("message with error handler")
+	}
+}
+
+// BenchmarkDynamicLevelChange benchmarks frequent dynamic level changes
+func BenchmarkDynamicLevelChange(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_dynamic_level",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
-		b.StopTimer()
-	} else {
-		// Run normal benchmark
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			logger.Info("time-based rotation message")
+	}()
+
+	counter := 0
+	logger.SetDynamicLevelFunc(func() LogLevel {
+		counter++
+		return LogLevel(counter % 5)
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("message with dynamic level")
+	}
+}
+
+// BenchmarkLoggingWithRateLimiting benchmarks logging with rate limiting
+func BenchmarkLoggingWithRateLimiting(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_rate_limit",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		MaxLogRate:   100000, // 100,000 logs per second
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("rate limited message")
+	}
+}
+
+// BenchmarkLoggingWithPauseResume benchmarks pausing and resuming the logger
+func BenchmarkLoggingWithPauseResume(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_pause_resume",
+		BufferSize:   1000,
+		AsyncWorkers: 4,
+		LogLevel:     DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if i%10 == 0 {
+			logger.Pause()
+		}
+		if i%10 == 5 {
+			logger.Resume()
+		}
+		logger.Info("message with pause/resume")
+	}
+}
+
+// BenchmarkAddRemoveOutput benchmarks adding and removing outputs
+func BenchmarkAddRemoveOutput(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:  tempDir,
+		Filename: "bench_add_remove",
+		LogLevel: DEBUG,
+	}
+
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
+
+	output := &bytes.Buffer{}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.AddOutput(output)
+		logger.RemoveOutput(output)
 	}
 }
 
 // BenchmarkMixedOperations benchmarks mixed logging operations
 func BenchmarkMixedOperations(b *testing.B) {
-	config := DefaultConfig()
-	config.Outputs = []io.Writer{io.Discard}
-	config.BufferSize = 1000
-	config.AsyncWorkers = 4
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_mixed",
+		BufferSize:   10000,
+		AsyncWorkers: 8,
+		LogLevel:     DEBUG,
+	}
+
 	logger, err := NewGourdianLogger(config)
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer logger.Close()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
+		}
+	}()
 
-	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		count := 0
 		for pb.Next() {
@@ -798,7 +821,7 @@ func BenchmarkMixedOperations(b *testing.B) {
 				"iteration": count,
 			}
 
-			switch count % 5 {
+			switch count % 6 {
 			case 0:
 				logger.Debugf("debug message %d", count)
 			case 1:
@@ -809,19 +832,52 @@ func BenchmarkMixedOperations(b *testing.B) {
 				logger.Errorf("error message %d", count)
 			case 4:
 				logger.InfoWithFields(fields, "structured info")
+			case 5:
+				logger.SetLogLevel(LogLevel(count % 5))
 			}
 		}
 	})
-	b.StopTimer()
-	logger.Flush()
 }
 
-func BenchmarkWithSharedData(b *testing.B) {
-	var sharedMap sync.Map
+// BenchmarkHighContention benchmarks logging under high contention
+func BenchmarkHighContention(b *testing.B) {
+	tempDir := b.TempDir()
+	config := LoggerConfig{
+		LogsDir:      tempDir,
+		Filename:     "bench_contention",
+		BufferSize:   100,
+		AsyncWorkers: 2, // Few workers to increase contention
+		LogLevel:     DEBUG,
+	}
 
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			sharedMap.Store("key", "value") // Thread-safe operation
+	logger, err := NewGourdianLogger(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := logger.Close(); err != nil {
+			log.Printf("Error closing logger: %v", err)
 		}
-	})
+	}()
+
+	var wg sync.WaitGroup
+	workers := 100
+	iterations := b.N / workers
+	if iterations == 0 {
+		iterations = 1
+	}
+
+	b.ResetTimer()
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				logger.Infof("message from worker %d, iteration %d", id, i)
+			}
+		}(w)
+	}
+	wg.Wait()
+	b.StopTimer()
+	logger.Flush()
 }
