@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (73.4%)</option>
+				<option value="file0">github.com/gourdian25/gourdianlogger/gourdianlogger.go (71.9%)</option>
 				
 				</select>
 			</div>
@@ -78,6 +78,7 @@ import (
         "encoding/json"
         "fmt"
         "io"
+        "log"
         "os"
         "path/filepath"
         "runtime"
@@ -201,27 +202,35 @@ func (l LogLevel) String() string <span class="cov8" title="1">{
 
 // ParseLogLevel converts a string representation of a log level to a LogLevel constant.
 // Valid strings (case-insensitive): "DEBUG", "INFO", "WARN"/"WARNING", "ERROR", "FATAL".
-//
-// Example:
-//
-//        level, err := ParseLogLevel("info") // Returns INFO, nil
-//        if err != nil {
-//            // handle error
-//        }
-func ParseLogLevel(level string) (LogLevel, error) <span class="cov0" title="0">{
+func ParseLogLevel(level string) LogLevel <span class="cov0" title="0">{
         switch strings.ToUpper(level) </span>{
         case "DEBUG":<span class="cov0" title="0">
-                return DEBUG, nil</span>
+                return DEBUG</span>
         case "INFO":<span class="cov0" title="0">
-                return INFO, nil</span>
+                return INFO</span>
         case "WARN", "WARNING":<span class="cov0" title="0">
-                return WARN, nil</span>
+                return WARN</span>
         case "ERROR":<span class="cov0" title="0">
-                return ERROR, nil</span>
+                return ERROR</span>
         case "FATAL":<span class="cov0" title="0">
-                return FATAL, nil</span>
+                return FATAL</span>
         default:<span class="cov0" title="0">
-                return DEBUG, fmt.Errorf("invalid log level: %s", level)</span>
+                log.Printf("invalid log level: %s, falling back to default %v", level, defaultLogLevel)
+                return defaultLogLevel</span>
+        }
+}
+
+// ParseLogFormat converts a string representation of a log format to a LogFormat constant.
+// Valid strings (case-insensitive): "PLAIN", "JSON".
+func ParseLogFormat(format string) LogFormat <span class="cov0" title="0">{
+        switch strings.ToUpper(format) </span>{
+        case "PLAIN":<span class="cov0" title="0">
+                return FormatPlain</span>
+        case "JSON":<span class="cov0" title="0">
+                return FormatJSON</span>
+        default:<span class="cov0" title="0">
+                log.Printf("invalid log format: %s, falling back to default %v", format, defaultLogFormat)
+                return defaultLogFormat</span>
         }
 }
 
@@ -741,7 +750,7 @@ func (l *Logger) log(level LogLevel, message string, fields map[string]interface
 
                 select </span>{
                 case l.asyncQueue &lt;- buf:<span class="cov8" title="1"></span>
-                default:<span class="cov8" title="1">
+                default:<span class="cov0" title="0">
                         l.writeBuffer(buf)</span>
                 }
         } else<span class="cov8" title="1"> {

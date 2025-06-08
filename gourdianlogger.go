@@ -144,7 +144,7 @@ func ParseLogLevel(level string) LogLevel {
 	case "FATAL":
 		return FATAL
 	default:
-		log.Printf("invalid log level: %s, falling back to default %s", level, defaultLogLevel)
+		log.Printf("invalid log level: %s, falling back to default %v", level, defaultLogLevel)
 		return defaultLogLevel
 	}
 }
@@ -158,7 +158,7 @@ func ParseLogFormat(format string) LogFormat {
 	case "JSON":
 		return FormatJSON
 	default:
-		log.Printf("invalid log format: %s, falling back to default %s", format, defaultLogFormat)
+		log.Printf("invalid log format: %s, falling back to default %v", format, defaultLogFormat)
 		return defaultLogFormat
 	}
 }

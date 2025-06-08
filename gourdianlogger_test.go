@@ -91,11 +91,7 @@ func TestParseLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := ParseLogLevel(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseLogLevel() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+			got := ParseLogLevel(tt.input)
 			if !tt.wantErr && got != tt.expected {
 				t.Errorf("ParseLogLevel() = %v, want %v", got, tt.expected)
 			}
