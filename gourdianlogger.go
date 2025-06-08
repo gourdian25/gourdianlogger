@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -130,27 +131,35 @@ func (l LogLevel) String() string {
 
 // ParseLogLevel converts a string representation of a log level to a LogLevel constant.
 // Valid strings (case-insensitive): "DEBUG", "INFO", "WARN"/"WARNING", "ERROR", "FATAL".
-//
-// Example:
-//
-//	level, err := ParseLogLevel("info") // Returns INFO, nil
-//	if err != nil {
-//	    // handle error
-//	}
-func ParseLogLevel(level string) (LogLevel, error) {
+func ParseLogLevel(level string) LogLevel {
 	switch strings.ToUpper(level) {
 	case "DEBUG":
-		return DEBUG, nil
+		return DEBUG
 	case "INFO":
-		return INFO, nil
+		return INFO
 	case "WARN", "WARNING":
-		return WARN, nil
+		return WARN
 	case "ERROR":
-		return ERROR, nil
+		return ERROR
 	case "FATAL":
-		return FATAL, nil
+		return FATAL
 	default:
-		return DEBUG, fmt.Errorf("invalid log level: %s", level)
+		log.Printf("invalid log level: %s, falling back to default %v", level, defaultLogLevel)
+		return defaultLogLevel
+	}
+}
+
+// ParseLogFormat converts a string representation of a log format to a LogFormat constant.
+// Valid strings (case-insensitive): "PLAIN", "JSON".
+func ParseLogFormat(format string) LogFormat {
+	switch strings.ToUpper(format) {
+	case "PLAIN":
+		return FormatPlain
+	case "JSON":
+		return FormatJSON
+	default:
+		log.Printf("invalid log format: %s, falling back to default %v", format, defaultLogFormat)
+		return defaultLogFormat
 	}
 }
 
