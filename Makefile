@@ -1,153 +1,139 @@
 # ==============================================================================
-# Go Library Makefile — gourdianlogger
+# 📦 gourdianlogger — Go Library Makefile
+# ==============================================================================
+# This Makefile is designed for a Go *library*
+# - No build targets
+# - Strong linting & testing
+# - CI-safe targets
+# - Explicit release guardrails
 # ==============================================================================
 
-# ----------------------------------------------------------------------
-# Metadata
-# ----------------------------------------------------------------------
-MODULE          := github.com/gourdian25/gourdianlogger
-VERSION         ?= v0.0.6
-GO              := go
-GOLANGCI_LINT   := golangci-lint
-
-# ----------------------------------------------------------------------
-# Directories
-# ----------------------------------------------------------------------
-COVERAGE_DIR    := test_coverage
-
-# ----------------------------------------------------------------------
-# Default target
-# ----------------------------------------------------------------------
 .DEFAULT_GOAL := help
 
-# ----------------------------------------------------------------------
-# Phony targets
-# ----------------------------------------------------------------------
-.PHONY: \
-	help \
-	test test-race bench \
-	coverage coverage-unit coverage-integration coverage-all \
-	coverage-summary \
-	lint lint-fix \
-	fmt vet tidy \
-	clean clean-coverage \
-	tag release
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+GO              := go
+GOLANGCI_LINT   := golangci-lint
+COVERAGE_DIR    := test_coverage
 
-# ----------------------------------------------------------------------
+# VERSION must be explicitly provided for release/tag
+VERSION ?=
+
+# ------------------------------------------------------------------------------
+# Guardrails
+# ------------------------------------------------------------------------------
+.PHONY: guard-version
+guard-version: ## Ensure VERSION is provided (required for release/tag)
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION is required (example: make release VERSION=v0.1.0)"; \
+		exit 1; \
+	fi
+
+# ------------------------------------------------------------------------------
 # Help
-# ----------------------------------------------------------------------
-help:
+# ------------------------------------------------------------------------------
+.PHONY: help
+help: ## Show available Makefile targets
 	@echo ""
-	@echo "Go Library Makefile — gourdianlogger"
+	@echo "📦 gourdianlogger — Go Library Makefile"
+	@echo "────────────────────────────────────────"
 	@echo ""
-	@echo "Usage:"
-	@echo "  make <target>"
-	@echo ""
-	@echo "Testing:"
-	@echo "  test                    Run unit tests"
-	@echo "  test-race               Run tests with race detector"
-	@echo "  bench                   Run benchmarks"
-	@echo ""
-	@echo "Coverage:"
-	@echo "  coverage                Generate full coverage HTML"
-	@echo "  coverage-unit           Unit tests coverage only"
-	@echo "  coverage-integration    Integration tests coverage only"
-	@echo "  coverage-all            Generate all coverage reports"
-	@echo "  coverage-summary        Print coverage summary"
-	@echo ""
-	@echo "Code quality:"
-	@echo "  fmt                     Format code"
-	@echo "  vet                     Run go vet"
-	@echo "  lint                    Run golangci-lint"
-	@echo "  lint-fix                Auto-fix lint issues"
-	@echo ""
-	@echo "Maintenance:"
-	@echo "  tidy                    Go mod tidy"
-	@echo "  clean                   Clean generated files"
-	@echo ""
-	@echo "Release:"
-	@echo "  tag                     Create and push git tag"
-	@echo "  release                 Tag + GoReleaser"
+	@awk 'BEGIN {FS = ":.*##"} \
+	/^[a-zA-Z0-9_-]+:.*##/ { \
+		printf "  \033[32m%-24s\033[0m %s\n", $$1, $$2 \
+	}' $(MAKEFILE_LIST)
 	@echo ""
 
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Formatting & Hygiene
+# ------------------------------------------------------------------------------
+.PHONY: fmt
+fmt: ## Format Go code
+	$(GO) fmt ./...
+
+.PHONY: tidy
+tidy: ## Run go mod tidy
+	$(GO) mod tidy
+
+.PHONY: vet
+vet: ## Run go vet
+	$(GO) vet ./...
+
+# ------------------------------------------------------------------------------
+# Linting
+# ------------------------------------------------------------------------------
+.PHONY: lint
+lint: ## Run golangci-lint
+	$(GOLANGCI_LINT) run
+
+.PHONY: lint-fix
+lint-fix: ## Run golangci-lint with auto-fix
+	$(GOLANGCI_LINT) run --fix
+
+# ------------------------------------------------------------------------------
 # Testing
-# ----------------------------------------------------------------------
-test:
+# ------------------------------------------------------------------------------
+.PHONY: test
+test: ## Run all unit tests
 	$(GO) test ./...
 
-test-race:
+.PHONY: test-race
+test-race: ## Run tests with race detector
 	$(GO) test -race ./...
 
-bench:
+.PHONY: bench
+bench: ## Run benchmarks
 	$(GO) test -bench=. -benchmem -run=^$$ ./...
 
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Coverage
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 $(COVERAGE_DIR):
 	mkdir -p $(COVERAGE_DIR)
 
-coverage: $(COVERAGE_DIR)
+.PHONY: coverage
+coverage: $(COVERAGE_DIR) ## Generate HTML coverage report
 	$(GO) test -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
 	$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out \
 		-o $(COVERAGE_DIR)/coverage.html
-	@echo "✔ Coverage report: $(COVERAGE_DIR)/coverage.html"
+	@echo "✔ Coverage report generated: $(COVERAGE_DIR)/coverage.html"
 
-coverage-unit: $(COVERAGE_DIR)
-	$(GO) test -coverprofile=$(COVERAGE_DIR)/unit.out \
-		-run="^Test[^_]*$$" ./...
-	$(GO) tool cover -html=$(COVERAGE_DIR)/unit.out \
-		-o $(COVERAGE_DIR)/unit.html
-	@echo "✔ Unit coverage report generated"
-
-coverage-integration: $(COVERAGE_DIR)
-	$(GO) test -coverprofile=$(COVERAGE_DIR)/integration.out \
-		-run="Integration" ./...
-	$(GO) tool cover -html=$(COVERAGE_DIR)/integration.out \
-		-o $(COVERAGE_DIR)/integration.html
-	@echo "✔ Integration coverage report generated"
-
-coverage-all: coverage coverage-unit coverage-integration
-	@echo "✔ All coverage reports generated in $(COVERAGE_DIR)/"
-
-coverage-summary: $(COVERAGE_DIR)
+.PHONY: coverage-summary
+coverage-summary: $(COVERAGE_DIR) ## Print coverage summary
 	$(GO) test -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
 	$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out
 
-# ----------------------------------------------------------------------
-# Code quality
-# ----------------------------------------------------------------------
-fmt:
-	$(GO) fmt ./...
-
-vet:
-	$(GO) vet ./...
-
-lint:
-	$(GOLANGCI_LINT) run
-
-lint-fix:
-	$(GOLANGCI_LINT) run --fix
-
-tidy:
-	$(GO) mod tidy
-
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Cleanup
-# ----------------------------------------------------------------------
-clean-coverage:
+# ------------------------------------------------------------------------------
+.PHONY: clean
+clean: ## Clean generated files and test cache
 	rm -rf $(COVERAGE_DIR)
-
-clean: clean-coverage
 	$(GO) clean -testcache
 
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# CI Targets (DO NOT use locally)
+# ------------------------------------------------------------------------------
+.PHONY: ci-test
+ci-test: ## [CI] Run tests
+	$(GO) test ./...
+
+.PHONY: ci-lint
+ci-lint: ## [CI] Run linter
+	$(GOLANGCI_LINT) run
+
+.PHONY: ci
+ci: ci-lint ci-test ## [CI] Run full CI pipeline
+
+# ------------------------------------------------------------------------------
 # Release
-# ----------------------------------------------------------------------
-tag:
+# ------------------------------------------------------------------------------
+.PHONY: tag
+tag: guard-version ## Create and push git tag
 	git tag $(VERSION)
 	git push origin $(VERSION)
 
-release: tag
+.PHONY: release
+release: guard-version tag ## Create release using GoReleaser
 	goreleaser release --clean
