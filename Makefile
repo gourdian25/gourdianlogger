@@ -1,100 +1,153 @@
-VERSION := v0.0.6
+# ==============================================================================
+# Go Library Makefile — gourdianlogger
+# ==============================================================================
 
-# Create test coverage directory
-COVERAGE_DIR := test_coverage
+# ----------------------------------------------------------------------
+# Metadata
+# ----------------------------------------------------------------------
+MODULE          := github.com/gourdian25/gourdianlogger
+VERSION         ?= v0.0.6
+GO              := go
+GOLANGCI_LINT   := golangci-lint
 
-# Create test coverage directory
-COVERAGE_DIR := test_coverage
+# ----------------------------------------------------------------------
+# Directories
+# ----------------------------------------------------------------------
+COVERAGE_DIR    := test_coverage
 
-.PHONY: build
-build:
-	go build -ldflags="-X github.com/gourdian25/gourdianlogger.Version=$(VERSION)" ./...
+# ----------------------------------------------------------------------
+# Default target
+# ----------------------------------------------------------------------
+.DEFAULT_GOAL := help
 
-.PHONY: test
+# ----------------------------------------------------------------------
+# Phony targets
+# ----------------------------------------------------------------------
+.PHONY: \
+	help \
+	test test-race bench \
+	coverage coverage-unit coverage-integration coverage-all \
+	coverage-summary \
+	lint lint-fix \
+	fmt vet tidy \
+	clean clean-coverage \
+	tag release
+
+# ----------------------------------------------------------------------
+# Help
+# ----------------------------------------------------------------------
+help:
+	@echo ""
+	@echo "Go Library Makefile — gourdianlogger"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make <target>"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test                    Run unit tests"
+	@echo "  test-race               Run tests with race detector"
+	@echo "  bench                   Run benchmarks"
+	@echo ""
+	@echo "Coverage:"
+	@echo "  coverage                Generate full coverage HTML"
+	@echo "  coverage-unit           Unit tests coverage only"
+	@echo "  coverage-integration    Integration tests coverage only"
+	@echo "  coverage-all            Generate all coverage reports"
+	@echo "  coverage-summary        Print coverage summary"
+	@echo ""
+	@echo "Code quality:"
+	@echo "  fmt                     Format code"
+	@echo "  vet                     Run go vet"
+	@echo "  lint                    Run golangci-lint"
+	@echo "  lint-fix                Auto-fix lint issues"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  tidy                    Go mod tidy"
+	@echo "  clean                   Clean generated files"
+	@echo ""
+	@echo "Release:"
+	@echo "  tag                     Create and push git tag"
+	@echo "  release                 Tag + GoReleaser"
+	@echo ""
+
+# ----------------------------------------------------------------------
+# Testing
+# ----------------------------------------------------------------------
 test:
-	go test -v .
+	$(GO) test ./...
 
-# Create coverage directory if it doesn't exist
+test-race:
+	$(GO) test -race ./...
+
+bench:
+	$(GO) test -bench=. -benchmem -run=^$$ ./...
+
+# ----------------------------------------------------------------------
+# Coverage
+# ----------------------------------------------------------------------
 $(COVERAGE_DIR):
 	mkdir -p $(COVERAGE_DIR)
 
-# Run all tests with coverage
-.PHONY: coverage
 coverage: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/coverage.out .
-	go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
-	@echo "HTML coverage report saved as $(COVERAGE_DIR)/coverage.html"
+	$(GO) test -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out \
+		-o $(COVERAGE_DIR)/coverage.html
+	@echo "✔ Coverage report: $(COVERAGE_DIR)/coverage.html"
 
-# Run unit tests only (exclude integration, benchmark, and race tests)
-.PHONY: coverage-unit
 coverage-unit: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/unit_coverage.out -run="^Test[^_]*$$" .
-	go tool cover -html=$(COVERAGE_DIR)/unit_coverage.out -o $(COVERAGE_DIR)/unit_coverage.html
-	@echo "Unit test HTML coverage report saved as $(COVERAGE_DIR)/unit_coverage.html"
+	$(GO) test -coverprofile=$(COVERAGE_DIR)/unit.out \
+		-run="^Test[^_]*$$" ./...
+	$(GO) tool cover -html=$(COVERAGE_DIR)/unit.out \
+		-o $(COVERAGE_DIR)/unit.html
+	@echo "✔ Unit coverage report generated"
 
-# Run integration tests only
-.PHONY: coverage-integration
 coverage-integration: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/integration_coverage.out -run="Integration" .
-	go tool cover -html=$(COVERAGE_DIR)/integration_coverage.out -o $(COVERAGE_DIR)/integration_coverage.html
-	@echo "Integration test HTML coverage report saved as $(COVERAGE_DIR)/integration_coverage.html"
+	$(GO) test -coverprofile=$(COVERAGE_DIR)/integration.out \
+		-run="Integration" ./...
+	$(GO) tool cover -html=$(COVERAGE_DIR)/integration.out \
+		-o $(COVERAGE_DIR)/integration.html
+	@echo "✔ Integration coverage report generated"
 
-# Run benchmark tests only
-.PHONY: coverage-benchmark
-coverage-benchmark: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/benchmark_coverage.out -run="Benchmark" .
-	go tool cover -html=$(COVERAGE_DIR)/benchmark_coverage.out -o $(COVERAGE_DIR)/benchmark_coverage.html
-	@echo "Benchmark test HTML coverage report saved as $(COVERAGE_DIR)/benchmark_coverage.html"
+coverage-all: coverage coverage-unit coverage-integration
+	@echo "✔ All coverage reports generated in $(COVERAGE_DIR)/"
 
-# Run race tests only
-.PHONY: coverage-race
-coverage-race: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/race_coverage.out -run="Race" -race .
-	go tool cover -html=$(COVERAGE_DIR)/race_coverage.out -o $(COVERAGE_DIR)/race_coverage.html
-	@echo "Race test HTML coverage report saved as $(COVERAGE_DIR)/race_coverage.html"
-
-# Generate all coverage reports
-.PHONY: coverage-all
-coverage-all: coverage-unit coverage-integration coverage-benchmark coverage-race coverage
-	@echo "All coverage reports generated in $(COVERAGE_DIR)/"
-
-# Generate coverage summary for all test types
-.PHONY: coverage-summary
 coverage-summary: $(COVERAGE_DIR)
-	@echo "=== Overall Coverage Summary ==="
-	go test -coverprofile=$(COVERAGE_DIR)/coverage.out .
-	go tool cover -func=$(COVERAGE_DIR)/coverage.out
-	@echo ""
-	@echo "=== Unit Tests Coverage Summary ==="
-	go test -coverprofile=$(COVERAGE_DIR)/unit_coverage.out -run="^Test[^_]*$$" .
-	go tool cover -func=$(COVERAGE_DIR)/unit_coverage.out
-	@echo ""
-	@echo "=== Integration Tests Coverage Summary ==="
-	go test -coverprofile=$(COVERAGE_DIR)/integration_coverage.out -run="Integration" .
-	go tool cover -func=$(COVERAGE_DIR)/integration_coverage.out
+	$(GO) test -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out
 
-# Generate coverage summary for specific test type
-.PHONY: coverage-summary-unit
-coverage-summary-unit: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/unit_coverage.out -run="^Test[^_]*$$" .
-	go tool cover -func=$(COVERAGE_DIR)/unit_coverage.out
+# ----------------------------------------------------------------------
+# Code quality
+# ----------------------------------------------------------------------
+fmt:
+	$(GO) fmt ./...
 
-.PHONY: coverage-summary-integration
-coverage-summary-integration: $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/integration_coverage.out -run="Integration" .
-	go tool cover -func=$(COVERAGE_DIR)/integration_coverage.out
+vet:
+	$(GO) vet ./...
 
-.PHONY: bench
-bench:
-	go test -bench=. -benchmem -run=^$$ .
+lint:
+	$(GOLANGCI_LINT) run
 
-# Clean coverage files
-.PHONY: clean-coverage
+lint-fix:
+	$(GOLANGCI_LINT) run --fix
+
+tidy:
+	$(GO) mod tidy
+
+# ----------------------------------------------------------------------
+# Cleanup
+# ----------------------------------------------------------------------
 clean-coverage:
 	rm -rf $(COVERAGE_DIR)
 
-.PHONY: release
-release:
+clean: clean-coverage
+	$(GO) clean -testcache
+
+# ----------------------------------------------------------------------
+# Release
+# ----------------------------------------------------------------------
+tag:
 	git tag $(VERSION)
 	git push origin $(VERSION)
+
+release: tag
 	goreleaser release --clean
